@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────
+#  Render Blueprint — Face Auth Backend
+#  Docs: https://docs.render.com/blueprint-spec
+# ─────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: face-auth-backend
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.6"
+      - key: APP_NAME
+        value: "Face Auth API"
+      - key: APP_VERSION
+        value: "1.0.0"
+      - key: DEBUG
+        value: "False"
+      - key: ENVIRONMENT
+        value: "production"
+      - key: MONGODB_URL
+        sync: false  # Must be set manually (MongoDB Atlas connection string)
+      - key: MONGODB_DB_NAME
+        value: "face_auth_db"
+      - key: JWT_SECRET_KEY
+        generateValue: true  # Render auto-generates a secure random value
+      - key: JWT_ALGORITHM
+        value: "HS256"
+      - key: JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+      - key: JWT_REFRESH_TOKEN_EXPIRE_DAYS
+        value: "7"
+      - key: FACE_SIMILARITY_THRESHOLD
+        value: "0.50"
+      - key: MAX_FACE_IMAGES
+        value: "4"
+      - key: EMBEDDING_ENCRYPTION_KEY
+        generateValue: true
+      - key: RATE_LIMIT_REQUESTS
+        value: "100"
+      - key: RATE_LIMIT_WINDOW_SECONDS
+        value: "60"
+      - key: CORS_ORIGINS
+        sync: false  # Must be set to your Vercel frontend URL
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: MAIL_USERNAME
+        value: "srakeshkumarrk2468@gmail.com"
+      - key: MAIL_PASSWORD
+        value: "tyhk wqna ctgi wqxw"
+      - key: MAIL_FROM
+        value: "srakeshkumarrk2468@gmail.com"
+      - key: MAIL_PORT
+        value: "587"
+      - key: MAIL_SERVER
+        value: "smtp.gmail.com"

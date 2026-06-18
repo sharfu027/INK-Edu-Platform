@@ -1,0 +1,14 @@
+{
+  "name": "ink-edu-platform",
+  "version": "1.0.0",
+  "description": "INK Edu Platform - Secure Automated Attendance and AI Assistant Portal",
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend && npm install --prefix vidya-ai/frontend",
+    "start:backend": "npm start --prefix backend",
+    "start:frontend": "npm run dev --prefix frontend",
+    "start": "npx concurrently --kill-others \"npm run start:backend\" \"npm run start:frontend\""
+  },
+  "dependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

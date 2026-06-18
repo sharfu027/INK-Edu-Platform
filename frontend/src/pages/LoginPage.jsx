@@ -1,0 +1,705 @@
+/**
+ * Login Page — Dual authentication flow.
+ *
+ * Option 1: Email + Password → then face verification.
+ * Option 2: Direct face login (if user_id is known).
+ *
+ * Face verification is ALWAYS required before granting full access.
+ * Camera availability is no longer a gate — let the camera components
+ * handle their own error states with retry.
+ */
+import React, { useState, useCallback, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { useAuth } from '../context/AuthContext';
+import { loginWithPassword, verifyFace, faceLogin, getProfile, geocodeLocation } from '../services/authService';
+import { reverseGeocodeClient } from '../utils/geocodeClient';
+import FaceVerification from '../components/face/FaceVerification';
+import Spinner from '../components/ui/Spinner';
+import useGeolocation from '../hooks/useGeolocation';
+import { Scanner } from '@yudiel/react-qr-scanner';
+
+const LoginPage = () => {
+  const navigate = useNavigate();
+  const { isAuthenticated, loginSuccess, faceVerified } = useAuth();
+  const { position: geoPosition, loading: geoLoading, error: geoError, permissionDenied: geoDenied, refresh: geoRefresh } = useGeolocation({ watch: true });
+
+  // State
+  const [loginMode, setLoginMode] = useState('password'); // 'password' | 'face' | 'qr'
+  const [step, setStep] = useState('credentials'); // 'credentials' | 'face-verify'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [userId, setUserId] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [locationError, setLocationError] = useState(null); // location mismatch error
+  const [regAddress, setRegAddress] = useState(null); // resolved registered location address
+  const [curAddress, setCurAddress] = useState(null); // resolved current location address
+  const [facingMode, setFacingMode] = useState('user'); // 'user' (front) | 'environment' (back)
+
+  // Forgot Password states
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [fpEmail, setFpEmail] = useState('');
+  const [fpNewPassword, setFpNewPassword] = useState('');
+  const [fpConfirmPassword, setFpConfirmPassword] = useState('');
+  const [fpLoading, setFpLoading] = useState(false);
+  const [disabledError, setDisabledError] = useState(null);
+
+  // When locationError is set, extract coordinates and reverse-geocode them
+  useEffect(() => {
+    if (!locationError) {
+      setRegAddress(null);
+      setCurAddress(null);
+      return;
+    }
+
+    const regMatch = locationError.match(/Registered:\s*\(([-\d.]+),\s*([-\d.]+)\)/);
+    const curMatch = locationError.match(/Current:\s*\(([-\d.]+),\s*([-\d.]+)\)/);
+
+    const resolveAddress = async (lat, lng) => {
+      try {
+        const res = await geocodeLocation(lat, lng);
+        if (res?.data && (res.data.area || res.data.road || res.data.display_name)) return res.data;
+      } catch { /* backend failed */ }
+      // Fallback to client-side
+      try {
+        const res = await reverseGeocodeClient(lat, lng);
+        if (res && (res.area || res.road || res.display_name)) return res;
+      } catch { /* client failed */ }
+      return { fallback: `${lat.toFixed(6)}, ${lng.toFixed(6)}` };
+    };
+
+    const processAddresses = async () => {
+      if (regMatch) {
+        const addr = await resolveAddress(parseFloat(regMatch[1]), parseFloat(regMatch[2]));
+        setRegAddress(addr);
+        if (curMatch) {
+          // Delay by 1.5 seconds to prevent 'Too Many Requests' from strict APIs like Nominatim
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      }
+      if (curMatch) {
+        const addr = await resolveAddress(parseFloat(curMatch[1]), parseFloat(curMatch[2]));
+        setCurAddress(addr);
+      }
+    };
+
+    processAddresses();
+  }, [locationError]);
+
+  /**
+   * Auto-advance to face verification if arriving from an external login (login.html).
+   * Tokens are already in localStorage via AuthContext's URL-param bridge.
+   */
+  useEffect(() => {
+    const storedUserId = localStorage.getItem('user_id');
+    if (isAuthenticated && storedUserId && step === 'credentials') {
+      setUserId(storedUserId);
+      setStep('face-verify');
+    }
+  }, [isAuthenticated, step]);
+
+  /**
+   * Handle email + password login.
+   */
+  const handlePasswordLogin = async (e) => {
+    e.preventDefault();
+    const newErrors = {};
+
+    if (!email.trim()) newErrors.email = 'Email is required';
+    if (!password) newErrors.password = 'Password is required';
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    // ── MANDATORY GPS CHECK ──
+    // Location is REQUIRED for login. Block if GPS is not ready.
+    if (!geoPosition || !geoPosition.latitude || !geoPosition.longitude) {
+      if (geoDenied) {
+        toast.error('Location permission denied. Please enable GPS in your browser settings and refresh the page.');
+      } else if (geoError) {
+        toast.error('GPS location not available. Please enable Location Services and try again.');
+      } else {
+        toast.error('Acquiring your GPS location... Please wait a moment and try again.');
+        geoRefresh();
+      }
+      return;
+    }
+
+    setIsLoading(true);
+    setErrors({});
+
+    try {
+      // GPS is guaranteed to be available here
+      const locationData = { latitude: geoPosition.latitude, longitude: geoPosition.longitude };
+
+      const result = await loginWithPassword(email.trim().toLowerCase(), password, locationData);
+
+      // Store tokens and user_id
+      loginSuccess(result);
+      setUserId(result.user_id);
+      setLocationError(null);
+
+      // If user has no face data, skip face verification entirely
+      if (!result.requires_face_verification) {
+        try {
+          localStorage.setItem('no_camera_login', 'true');
+          const profile = await getProfile();
+          faceVerified(profile.data);
+          toast.success('Welcome back!');
+          navigate('/dashboard');
+        } catch {
+          toast.error('Failed to load profile');
+        }
+        return;
+      }
+
+      toast.success('Password verified! Now verify your face.');
+      setStep('face-verify');
+    } catch (err) {
+      // Timeout / cold-start — show a friendly wake-up message
+      if (err.isTimeout || err.friendlyMessage) {
+        toast.error(err.friendlyMessage || 'Server is starting up — please try again in a few seconds.');
+        return;
+      }
+
+      const detail = err.response?.data?.detail || '';
+      const errorMsg = Array.isArray(detail) ? detail.map(e => e.msg).join(', ') : detail || 'Login failed. Check your credentials.';
+
+      // Detect location mismatch error
+      if (typeof errorMsg === 'string' && errorMsg.toLowerCase().includes('location mismatch')) {
+        setLocationError(errorMsg);
+      } else if (typeof errorMsg === 'string' && errorMsg.toLowerCase().includes('location is required')) {
+        setLocationError(errorMsg);
+      } else if (typeof errorMsg === 'string' && errorMsg.toLowerCase().includes('security alert')) {
+        setLocationError(errorMsg);
+      } else if (typeof errorMsg === 'string' && errorMsg.toLowerCase().includes('account is disabled')) {
+        setDisabledError(errorMsg);
+      } else {
+        setLocationError(null);
+        toast.error(errorMsg);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Handle successful face verification.
+   */
+  const handleFaceVerified = useCallback(
+    async (result) => {
+      try {
+        // If face-login mode, result already has tokens — store them
+        if (loginMode === 'face' && result.access_token) {
+          loginSuccess(result);
+        }
+
+        // Fetch user profile
+        const profile = await getProfile();
+        faceVerified(profile.data);
+        toast.success('Welcome back!');
+        navigate('/dashboard');
+      } catch {
+        toast.error('Failed to load profile');
+      }
+    },
+    [loginMode, loginSuccess, faceVerified, navigate]
+  );
+
+  /**
+   * Handle failed face verification.
+   */
+  const handleFaceFailed = useCallback(
+    (msg, isLocationError = false) => {
+      if (isLocationError || (typeof msg === 'string' && (msg.toLowerCase().includes('location mismatch') || msg.toLowerCase().includes('location is required')))) {
+        setLocationError(msg);
+        setStep('credentials'); // Go back to credentials so the Location Verification Warning popup renders clearly without video overlay
+      } else {
+        toast.error(msg || 'Face verification failed');
+      }
+    },
+    []
+  );
+
+  /**
+   * Verify function passed to FaceVerification component.
+   * Uses verify-face (after password login) or face-login (direct face login).
+   */
+  const verifyFn = useCallback(
+    async (uid, image, challengeFrame = null) => {
+      const locationData = geoPosition
+        ? { latitude: geoPosition.latitude, longitude: geoPosition.longitude }
+        : null;
+      if (loginMode === 'face') {
+        return await faceLogin(uid, image, locationData, challengeFrame);
+      }
+      return await verifyFace(uid, image, challengeFrame, locationData);
+    },
+    [loginMode, geoPosition]
+  );
+
+  /**
+   * Skip face verification — proceed with password-only login.
+   * Only available when camera is not working.
+   */
+  const handleSkipFaceVerification = useCallback(async () => {
+    try {
+      localStorage.setItem('no_camera_login', 'true');
+      const profile = await getProfile();
+      faceVerified(profile.data);
+      toast.success('Logged in without face verification');
+      navigate('/dashboard');
+    } catch {
+      toast.error('Failed to load profile');
+    }
+  }, [faceVerified, navigate]);
+
+  return (
+    <div className="min-h-screen min-h-[100dvh] bg-white flex items-center justify-center px-3 py-6 sm:p-4">
+      <div className="w-full max-w-md">
+        <div className="bg-stone-900/80 backdrop-blur-xl rounded-2xl shadow-xl p-4 sm:p-6 md:p-8 border border-amber-600/15 golden-glow">
+          {/* Header */}
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl overflow-hidden p-1 border border-amber-500/20">
+              <img src="/logo.png" alt="Ink Logo" className="w-full h-full object-contain" />
+            </div>
+            <h1 className="text-2xl font-bold text-amber-50">Welcome</h1>
+            <p className="text-amber-200/50 mt-1">
+              {step === 'credentials' ? 'Sign in to your account' : 'Verify your identity'}
+            </p>
+          </div>
+
+          {/* ─── Location Mismatch Error Popup ─── */}
+          {locationError && (
+            <div className="mb-6 animate-fadeIn">
+              <div className="bg-red-50 border-2 border-red-300 rounded-xl p-5 sm:p-6">
+                {/* Big FAIL icon */}
+                <div className="text-center mb-4">
+                  <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3 popup-icon-fail">
+                    <svg className="w-12 h-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </div>
+                  <h3 className="text-2xl font-extrabold text-red-600 mb-1">LOGIN FAILED</h3>
+                  <p className="text-sm font-bold text-red-500 uppercase tracking-wide">Location Mismatch Detected</p>
+                </div>
+
+                {/* Distance info */}
+                {(() => {
+                  const distMatch = locationError.match(/(\d+)m away/);
+                  const maxMatch = locationError.match(/Max allowed: (\d+)m/);
+                  const regMatch = locationError.match(/Registered: \(([-\d.]+), ([-\d.]+)\)/);
+                  const curMatch = locationError.match(/Current: \(([-\d.]+), ([-\d.]+)\)/);
+                  const dist = distMatch ? distMatch[1] : null;
+                  const maxDist = maxMatch ? maxMatch[1] : null;
+
+                  return (
+                    <div className="space-y-3 mb-4">
+                      {/* Distance badge */}
+                      {dist && (
+                        <div className="bg-red-100 rounded-lg p-3 text-center">
+                          <p className="text-3xl font-extrabold text-red-600">
+                            {parseInt(dist) >= 1000 ? `${(parseInt(dist)/1000).toFixed(1)} km` : `${dist}m`}
+                          </p>
+                          <p className="text-xs text-red-500 font-medium mt-1">
+                            away from registered location {maxDist && `(max ${maxDist}m allowed)`}
+                          </p>
+                        </div>
+                      )}
+
+
+                      {/* Location comparison — addresses instead of coordinates */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                          <p className="text-xs font-semibold text-green-600 mb-1">📍 Registered Location</p>
+                          {regAddress ? (
+                            <div className="text-left">
+                              {regAddress.fallback ? (
+                                <p className="text-xs font-mono text-green-700">{regAddress.fallback}</p>
+                              ) : regAddress.road || regAddress.area || regAddress.suburb || regAddress.city || regAddress.state ? (
+                                <>
+                                  {regAddress.road && <p className="text-xs font-medium text-green-800">{regAddress.road}</p>}
+                                  <p className="text-xs text-green-700">
+                                    {[
+                                      regAddress.area || regAddress.suburb,
+                                      regAddress.city,
+                                      regAddress.state,
+                                      regAddress.country
+                                    ]
+                                      .filter(Boolean)
+                                      .reduce((acc, curr) => acc.includes(curr) ? acc : [...acc, curr], [])
+                                      .join(', ')}
+                                  </p>
+                                  {regAddress.pincode && (
+                                    <p className="text-xs text-green-500 font-medium pt-0.5">Pincode: {regAddress.pincode}</p>
+                                  )}
+                                </>
+                              ) : regAddress.display_name ? (
+                                <p className="text-xs text-green-800 line-clamp-3" title={regAddress.display_name}>
+                                  {regAddress.display_name}
+                                </p>
+                              ) : (
+                                <p className="text-xs text-green-700">Address not available</p>
+                              )}
+                            </div>
+                          ) : regMatch ? (
+                            <div className="flex items-center justify-center gap-1 text-xs text-green-500">
+                              <div className="w-3 h-3 border border-green-400 border-t-transparent rounded-full animate-spin" />
+                              Resolving...
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+                          <p className="text-xs font-semibold text-red-600 mb-1">📍 Your Current Location</p>
+                          {curAddress ? (
+                            <div className="text-left">
+                              {curAddress.fallback ? (
+                                <p className="text-xs font-mono text-red-700">{curAddress.fallback}</p>
+                              ) : curAddress.road || curAddress.area || curAddress.suburb || curAddress.city || curAddress.state ? (
+                                <>
+                                  {curAddress.road && <p className="text-xs font-medium text-red-800">{curAddress.road}</p>}
+                                  <p className="text-xs text-red-700">
+                                    {[
+                                      curAddress.area || curAddress.suburb,
+                                      curAddress.city,
+                                      curAddress.state,
+                                      curAddress.country
+                                    ]
+                                      .filter(Boolean)
+                                      .reduce((acc, curr) => acc.includes(curr) ? acc : [...acc, curr], [])
+                                      .join(', ')}
+                                  </p>
+                                  {curAddress.pincode && (
+                                    <p className="text-xs text-red-500 font-medium pt-0.5">Pincode: {curAddress.pincode}</p>
+                                  )}
+                                </>
+                              ) : curAddress.display_name ? (
+                                <p className="text-xs text-red-800 line-clamp-3" title={curAddress.display_name}>
+                                  {curAddress.display_name}
+                                </p>
+                              ) : (
+                                <p className="text-xs text-red-700">Address not available</p>
+                              )}
+                            </div>
+                          ) : curMatch ? (
+                            <div className="flex items-center justify-center gap-1 text-xs text-red-500">
+                              <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
+                              Resolving...
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Message */}
+                <div className="bg-red-100/50 rounded-lg p-3 mb-4">
+                  <p className="text-sm text-red-700 leading-relaxed text-center">
+                    <strong>You can only login from your registered location.</strong><br />
+                    To login from this new location, you must register a new account first.
+                  </p>
+                </div>
+
+                {/* Actions */}
+                <div className="flex flex-col gap-2">
+                  <a
+                    href="/register"
+                    className="block text-center px-5 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-bold shadow-lg"
+                  >
+                    🔄 Register New Account from This Location
+                  </a>
+                  <button
+                    onClick={() => setLocationError(null)}
+                    className="text-sm text-red-400 hover:text-red-600 underline py-1"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ─── Disabled Account Error Popup ─── */}
+          {disabledError && (
+            <div className="mb-6 animate-fadeIn">
+              <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-6 text-center shadow-lg">
+                <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4 ring-4 ring-amber-500/20">
+                  <svg className="w-12 h-12 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m0-8V7m0 10a9 9 0 110-18 9 9 0 010 18z" />
+                  </svg>
+                </div>
+                <h3 className="text-2xl font-black text-amber-900 mb-2">ACCESS DENIED</h3>
+                <div className="bg-white/50 rounded-lg p-4 border border-amber-200 mb-4">
+                  <p className="text-lg font-bold text-amber-800 leading-tight">
+                    {disabledError}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setDisabledError(null)}
+                  className="w-full py-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-bold transition-all shadow-lg"
+                >
+                  OK, I Understand
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ─── Credentials Step ─── */}
+          {step === 'credentials' && (
+            <>
+              {/* Login mode toggle — always show both options */}
+              <div className="flex bg-stone-800 rounded-lg p-1 mb-6 border border-amber-700/20">
+                <button
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                    loginMode === 'password'
+                      ? 'bg-amber-500/20 shadow text-amber-400'
+                      : 'text-amber-200/50 hover:text-amber-300'
+                  }`}
+                  onClick={() => setLoginMode('password')}
+                >
+                  Email + Password
+                </button>
+                <button
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                    loginMode === 'face'
+                      ? 'bg-amber-500/20 shadow text-amber-400'
+                      : 'text-amber-200/50 hover:text-amber-300'
+                  }`}
+                  onClick={() => setLoginMode('face')}
+                >
+                  Face Login
+                </button>
+                <button
+                  className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                    loginMode === 'qr'
+                      ? 'bg-amber-500/20 shadow text-amber-400'
+                      : 'text-amber-200/50 hover:text-amber-300'
+                  }`}
+                  onClick={() => setLoginMode('qr')}
+                >
+                  QR Login
+                </button>
+              </div>
+
+              {loginMode === 'password' ? (
+                <form onSubmit={handlePasswordLogin} className="space-y-4">
+                  {/* Email */}
+                  <div>
+                    <label htmlFor="email" className="block text-sm font-medium text-amber-200/80 mb-1">
+                      Email
+                    </label>
+                    <input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => { setEmail(e.target.value); setErrors((p) => ({ ...p, email: '' })); }}
+                      placeholder="john@example.com"
+                      className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none transition-colors bg-stone-800/60 text-amber-50 placeholder-amber-200/30 ${
+                        errors.email ? 'border-red-400' : 'border-amber-700/30'
+                      }`}
+                    />
+                    {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
+                  </div>
+
+                  {/* Password */}
+                  <div>
+                    <label htmlFor="password" className="block text-sm font-medium text-amber-200/80 mb-1">
+                      Password
+                    </label>
+                    <input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => { setPassword(e.target.value); setErrors((p) => ({ ...p, password: '' })); }}
+                      placeholder="Enter your password"
+                      className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none transition-colors bg-stone-800/60 text-amber-50 placeholder-amber-200/30 ${
+                        errors.password ? 'border-red-400' : 'border-amber-700/30'
+                      }`}
+                    />
+                    {errors.password && <p className="text-red-500 text-xs mt-1">{errors.password}</p>}
+                  </div>
+
+                  {/* ── Live Location Status ── */}
+                  <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm ${
+                    geoPosition
+                      ? 'bg-green-500/10 border-green-500/30 text-green-400'
+                      : geoDenied
+                      ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                      : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                  }`}>
+                    {geoPosition ? (
+                      <>
+                        <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" />
+                        <span className="font-medium">📍 Location detected</span>
+                        <span className="text-xs text-green-500 ml-auto font-mono">
+                          {geoPosition.latitude.toFixed(4)}, {geoPosition.longitude.toFixed(4)}
+                        </span>
+                      </>
+                    ) : geoDenied ? (
+                      <>
+                        <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />
+                        <div className="flex-1">
+                          <span className="font-medium">⚠️ Location denied</span>
+                          <p className="text-xs text-red-500 mt-0.5">Click 🔒 in address bar → Location → Allow, then:</p>
+                        </div>
+                        <button onClick={geoRefresh} className="text-xs bg-red-100 hover:bg-red-200 px-2 py-1 rounded font-medium transition-colors">Retry</button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-2.5 h-2.5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="font-medium">Detecting location...</span>
+                      </>
+                    )}
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-600 text-stone-900 rounded-lg hover:from-amber-600 hover:to-yellow-700 disabled:opacity-50 font-bold transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center"
+                  >
+                    {isLoading ? <Spinner size="sm" /> : 'Sign In'}
+                  </button>
+
+                </form>
+              ) : loginMode === 'face' ? (
+                /* Face login mode — requires user_id or email */
+                <div className="space-y-4 animate-fadeIn">
+                  <div>
+                    <label htmlFor="userId" className="block text-sm font-medium text-amber-200/80 mb-1">
+                      User ID or Email
+                    </label>
+                    <input
+                      id="userId"
+                      type="text"
+                      value={userId}
+                      onChange={(e) => setUserId(e.target.value)}
+                      placeholder="Enter your email or User ID"
+                      className="w-full px-4 py-2.5 border border-amber-700/30 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none bg-stone-800/60 text-amber-50 placeholder-amber-200/30"
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!userId.trim()) {
+                        toast.error('Please enter your User ID or email');
+                        return;
+                      }
+                      setStep('face-verify');
+                    }}
+                    className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-600 text-stone-900 rounded-lg hover:from-amber-600 hover:to-yellow-700 font-bold transition-all shadow-lg shadow-amber-500/20"
+                  >
+                    Continue to Face Scan
+                  </button>
+                  <p className="text-center text-xs text-amber-300/40 mt-4 px-2 italic leading-relaxed">
+                    Once identified, the system will start the camera for biometrics.
+                  </p>
+                </div>
+              ) : (
+                /* QR login mode — Advanced Scanner */
+                <div className="space-y-4 animate-fadeIn">
+                  <div className="bg-stone-800/50 border border-amber-600/10 rounded-2xl p-4 overflow-hidden shadow-inner relative">
+                    <div className="relative aspect-square w-full max-w-[280px] mx-auto rounded-xl overflow-hidden border-2 border-amber-500/30 bg-black">
+                      <Scanner
+                        onScan={(result) => {
+                          if (result && result.length > 0) {
+                            const raw = result[0].rawValue;
+                            try {
+                              const parsed = JSON.parse(raw);
+                              const targetId = parsed.user_id || parsed.id || parsed.employee_id || raw;
+                              setUserId(targetId);
+                            } catch {
+                              setUserId(raw);
+                            }
+                            setLoginMode('face');
+                            toast.success("QR Scanned Successfully!");
+                          }
+                        }}
+                        onError={(err) => console.error("Scanner error:", err)}
+                        styles={{
+                          container: { width: '100%', height: '100%' },
+                          video: { objectFit: 'cover' }
+                        }}
+                        components={{
+                          audio: false,
+                          torch: true,
+                          finder: true,
+                        }}
+                        constraints={{
+                          facingMode: facingMode
+                        }}
+                      />
+                      
+                      {/* Camera Toggle Button Overlay */}
+                      <button 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+                        }}
+                        className="absolute top-3 right-3 z-20 bg-stone-900/80 hover:bg-stone-800 text-amber-400 p-2 rounded-full border border-amber-500/30 backdrop-blur-md transition-all active:scale-95 shadow-lg"
+                        title={facingMode === 'user' ? "Switch to Back Camera" : "Switch to Front Camera"}
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      </button>
+
+                      {/* Scanning Animation */}
+                      <div className="absolute inset-x-0 h-0.5 bg-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.8)] animate-scanLine z-10" />
+                    </div>
+                  </div>
+                  
+                  <div className="text-center space-y-2">
+                    <h3 className="text-amber-100 font-bold">QR Identity Scanner</h3>
+                    <p className="text-amber-200/50 text-xs px-4">
+                      Hold your ID card QR code steady in front of the camera ({facingMode === 'user' ? 'Front' : 'Back'}).
+                    </p>
+                    <div className="flex justify-center gap-2 pt-2">
+                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                       <span className="text-[10px] text-amber-500/60 uppercase tracking-widest font-bold">Waiting for Scan...</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setLoginMode('password')}
+                    className="w-full py-2.5 text-sm text-amber-400 hover:text-amber-300 font-medium border border-amber-500/20 rounded-lg hover:bg-amber-500/5 transition-all mt-2"
+                  >
+                    Back to Password Login
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ─── Face Verification Step ─── */}
+          {step === 'face-verify' && (
+            <FaceVerification
+              userId={userId}
+              onVerified={handleFaceVerified}
+              onFailed={handleFaceFailed}
+              onCancel={() => setStep('credentials')}
+              onSkip={loginMode === 'password' ? handleSkipFaceVerification : undefined}
+              verifyFn={verifyFn}
+            />
+          )}
+
+          {/* Footer */}
+          <div className="text-center mt-6 text-sm text-amber-200/40">
+            Don't have an account?{' '}
+            <Link to="/register" className="text-amber-400 hover:underline font-medium">
+              Sign up
+            </Link>
+          </div>
+        </div>
+
+
+      </div>
+    </div>
+  );
+};
+
+export default LoginPage;

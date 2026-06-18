@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --bg: #F8F9FA;
+    --surface: #FFFFFF;
+    --ink: #000000;
+    --ink-soft: #1E293B;
+    --muted: #F1F5F9;
+    --muted-fg: #64748B;
+    --border: #E2E8F0;
+    --accent: #2563EB;
+    --accent-fg: #FFFFFF;
+    --danger: #E11D48;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink-soft);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: 15px;
+    line-height: 1.55;
+}
+
+.font-display {
+    font-family: "Cabinet Grotesk", "IBM Plex Sans", sans-serif;
+    letter-spacing: -0.02em;
+}
+
+.font-mono {
+    font-family: "JetBrains Mono", monospace;
+}
+
+.label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--muted-fg);
+}
+
+@layer base {
+    :root {
+        --background: 210 17% 98%;
+        --foreground: 222 47% 11%;
+        --card: 0 0% 100%;
+        --card-foreground: 222 47% 11%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 222 47% 11%;
+        --primary: 0 0% 0%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 210 40% 96%;
+        --secondary-foreground: 222 47% 11%;
+        --muted: 210 40% 96%;
+        --muted-foreground: 215 16% 47%;
+        --accent: 217 91% 60%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 346 84% 49%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 214 32% 91%;
+        --input: 214 32% 91%;
+        --ring: 217 91% 60%;
+        --radius: 0.25rem;
+    }
+}
+
+@layer base {
+    * { @apply border-border; }
+    body { @apply bg-background text-foreground; }
+    h1, h2, h3, h4 { font-family: "Cabinet Grotesk", "IBM Plex Sans", sans-serif; }
+}
+
+/* Chat bubbles */
+.bubble-user {
+    background: #0F172A;
+    color: #fff;
+    border-radius: 4px 4px 0 4px;
+}
+.bubble-ai {
+    background: #fff;
+    color: #0F172A;
+    border: 1px solid #E2E8F0;
+    border-radius: 4px 4px 4px 0;
+}
+.bubble-ai pre {
+    background: #0F172A;
+    color: #E2E8F0;
+    padding: 12px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+}
+.bubble-ai code {
+    font-family: "JetBrains Mono", monospace;
+    background: #F1F5F9;
+    padding: 2px 5px;
+    border-radius: 2px;
+    font-size: 13px;
+}
+.bubble-ai pre code {
+    background: transparent;
+    padding: 0;
+}
+.bubble-ai h1, .bubble-ai h2, .bubble-ai h3 {
+    font-weight: 700;
+    margin: 10px 0 6px;
+}
+.bubble-ai h2 { font-size: 18px; }
+.bubble-ai h3 { font-size: 16px; }
+.bubble-ai ul, .bubble-ai ol { padding-left: 22px; margin: 6px 0; }
+.bubble-ai p { margin: 6px 0; }
+.bubble-ai strong { font-weight: 700; }
+
+/* Subtle grain texture for hero */
+.grain {
+    position: relative;
+}
+.grain::after {
+    content: "";
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(0,0,0,0.06) 1px, transparent 1px);
+    background-size: 3px 3px;
+    pointer-events: none;
+    opacity: 0.4;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Fade-up */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.5s ease-out both; }

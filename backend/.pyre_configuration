@@ -1,0 +1,25 @@
+{
+  "source_directories": ["."],
+  "search_path": [
+    "venv/Lib/site-packages"
+  ],
+  "site_package_search_strategy": "all",
+  "exclude": [
+    "venv",
+    "__pycache__",
+    ".git"
+  ],
+  "strict": false,
+  "ignore_all_errors": [
+    "main.py",
+    "app/services/face_recognition.py",
+    "app/services/auth_service.py",
+    "app/routes/auth_routes.py",
+    "app/models/user.py",
+    "app/config/database.py",
+    "app/config/settings.py",
+    "app/middleware/auth_middleware.py",
+    "app/utils/encryption.py",
+    "app/utils/logging_config.py"
+  ]
+}

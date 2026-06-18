@@ -1,0 +1,109 @@
+{
+  "project_name": "AI Study Assistant Platform",
+  "theme": "light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "vibe": "Objective, rigid, highly functional, academic authority.",
+  "typography": {
+    "font_family": {
+      "headings": "Cabinet Grotesk",
+      "body": "IBM Plex Sans",
+      "mono": "JetBrains Mono"
+    },
+    "rules": {
+      "h1": "text-5xl lg:text-6xl font-black tracking-tighter leading-none",
+      "h2": "text-3xl lg:text-4xl font-bold tracking-tight leading-tight",
+      "h3": "text-xl lg:text-2xl font-semibold tracking-tight",
+      "body": "text-base font-normal leading-relaxed text-slate-800",
+      "labels": "text-xs font-bold uppercase tracking-[0.2em] text-slate-500",
+      "general": "Never use Inter for headings. Use radical weight contrast (Black vs Light)."
+    }
+  },
+  "colors": {
+    "palette": {
+      "background": "#F8F9FA",
+      "surface": "#FFFFFF",
+      "primary": "#000000",
+      "primary_foreground": "#FFFFFF",
+      "accent": "#2563EB",
+      "accent_foreground": "#FFFFFF",
+      "muted": "#F1F5F9",
+      "muted_foreground": "#64748B",
+      "border": "#E2E8F0",
+      "danger": "#E11D48"
+    },
+    "rules": {
+      "contrast": "Minimum 4.5:1 for body text. Use pure black/white contrast for primary structural elements.",
+      "accents": "Color is Function Only. 95% of the UI should be monochrome. Use the accent Blue (#2563EB) strictly for active states, primary selections, and highlights.",
+      "hover": "Always explicitly set hover states with higher contrast (e.g., hover:bg-black/90)."
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous Spacing for landing pages, High-Density 'Control Room' for the app/dashboard.",
+    "landing_page": {
+      "grid": "Bento Grid (Mode A: The Tetris Grid). grid-cols-1 md:grid-cols-12 gap-8.",
+      "spacing": "Massive paddings (py-24 to py-32) between sections."
+    },
+    "app_dashboard": {
+      "grid": "Control Room Grid (Mode B). grid-cols-1 lg:grid-cols-4 gap-4 or gap-6. Strict hierarchy.",
+      "spacing": "Tight padding (p-4 to p-6) inside widgets."
+    }
+  },
+  "components": {
+    "surfaces": {
+      "cards": "Flat background, 1px subtle border (border-slate-200), no shadow by default. Sharp edges (rounded-sm or max rounded-md).",
+      "headers": "Solid background with a hard bottom border for the app. Glassmorphism (bg-white/70 backdrop-blur-xl border-b border-slate-200/50) for landing page sticky nav."
+    },
+    "inputs_and_forms": {
+      "style": "Sharp, technical borders. focus:ring-2 focus:ring-accent focus:border-accent. No soft shadows.",
+      "labels": "Clear, uppercase tracking-wider labels for form fields."
+    },
+    "chat_interface": {
+      "layout": "Progressive disclosure. Chat takes center stage with a collapsible right-sidebar for settings.",
+      "bubbles": "AI bubbles: surface background (white) with subtle border. User bubbles: pale gray (muted) background, no border. Sharp corners on the flush side, rounded on others."
+    },
+    "buttons": {
+      "primary": "bg-primary text-primary_foreground hover:bg-primary/90 rounded-sm font-semibold tracking-wide",
+      "secondary": "bg-muted text-slate-900 hover:bg-slate-200 rounded-sm font-medium",
+      "ghost": "hover:bg-slate-100 text-slate-700 rounded-sm"
+    }
+  },
+  "media": {
+    "images": [
+      {
+        "category": "hero_abstract",
+        "url": "https://static.prod-images.emergentagent.com/jobs/325386cb-2c1a-4577-a2a1-bbe83ae8f425/images/6138e0f4b5bc1b85a6bbbd4ba62e6350ebc0b0f26392ad6e9e5273aeb7e82606.png",
+        "description": "Minimalist high-end 3D abstract illustration of a glowing graduation cap floating above a neural network. Use for landing page hero."
+      },
+      {
+        "category": "feature_holographic_book",
+        "url": "https://static.prod-images.emergentagent.com/jobs/325386cb-2c1a-4577-a2a1-bbe83ae8f425/images/feec99fbd4b4adc7d23a089d8802bd3cfa24f3537005786744d57203ed48d780.png",
+        "description": "3D rendering of a futuristic textbook with glowing holographic diagrams. Use for the 'Diagram/Image Generator' feature showcase on landing page."
+      },
+      {
+        "category": "testimonial_background",
+        "url": "https://images.unsplash.com/photo-1523240795612-9a054b0db644?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwzfHxkaXZlcnNlJTIwc3R1ZGVudHMlMjBzdHVkeWluZyUyMGxhcHRvcHxlbnwwfHx8fDE3Nzk2MzU3Nzd8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Students studying with a laptop. Use for social proof / about section on the landing page."
+      },
+      {
+        "category": "library_ambient",
+        "url": "https://static.prod-images.emergentagent.com/jobs/325386cb-2c1a-4577-a2a1-bbe83ae8f425/images/c5c28f5a7363bdd52c74bed7d1a7776a5e35c555e9cae963c4289d5015ffa091.png",
+        "description": "Bright modern minimalist library. Use as a subtle backdrop or for the 'Question Paper Generator' feature section."
+      }
+    ],
+    "icons": {
+      "library": "lucide-react",
+      "usage": "Use crisp, uncluttered icons. Stroke width 1.5 or 2."
+    }
+  },
+  "instructions_to_main_agent": [
+    "1. IMPLEMENTATION STRATEGY: Build a marketing landing page AND the core SaaS application interface (Chat, Paper Generator, Diagram Generator).",
+    "2. LANDING PAGE: Use a Bento Grid layout with massive typography for headers (Cabinet Grotesk). Highlight the AI Chat and Generator features prominently using the provided generated media URLs.",
+    "3. SAAS INTERFACE: Implement a dense, 'Control Room' layout for the app. The 'Education Selector Bar' (Standard, Subject, Syllabus, etc.) must be prominent, either as a sticky top bar or a left sidebar filter panel.",
+    "4. COMPONENTS: heavily utilize shadcn/ui components but customize them to fit the Swiss & High-Contrast archetype. Reduce border-radius to max 4px (rounded-sm) for a sharp, technical look. Use 1px borders aggressively to separate sections.",
+    "5. CHAT UI: Build a ChatGPT-style interface with a focus on academic context. Ensure code blocks, tables, and long-form text are highly readable (use IBM Plex Sans).",
+    "6. GENERATORS: For the Question Paper and Diagram generators, create distinct forms utilizing grid layouts. Ensure there are 'Preview' areas (PDF preview, Image gallery) alongside the forms.",
+    "7. ASSETS: NEVER use placeholder image URLs. STRICTLY use the provided image URLs in the media section. Images must be contained properly without breaking mobile viewports (max-h-[80vh]).",
+    "8. TESTING: Apply 'data-testid' to ALL interactive elements (buttons, inputs, dropdowns) using kebab-case role-based naming (e.g., 'generate-paper-button').",
+    "9. FONTS: Import 'Cabinet Grotesk', 'IBM Plex Sans', and 'JetBrains Mono' from Google Fonts or equivalent CDN in the global CSS/HTML header."
+  ]
+}
