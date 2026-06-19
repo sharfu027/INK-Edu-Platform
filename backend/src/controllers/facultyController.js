@@ -49,8 +49,8 @@ export const addTeacher = async (req, res) => {
       }
 
       const schoolSettings = await SchoolSettings.findOne();
-      const defaultSkipFace = schoolSettings ? !!schoolSettings.face_auth_enabled : false;
-      const defaultSkipLocation = schoolSettings ? !!schoolSettings.location_auth_enabled : false;
+      const defaultSkipFace = schoolSettings ? !schoolSettings.face_auth_enabled : false;
+      const defaultSkipLocation = schoolSettings ? !schoolSettings.location_auth_enabled : false;
 
       const user = await User.create({
         name,
@@ -102,8 +102,8 @@ export const addNonTeachingStaff = async (req, res) => {
       }
 
       const schoolSettings = await SchoolSettings.findOne();
-      const defaultSkipFace = schoolSettings ? !!schoolSettings.face_auth_enabled : false;
-      const defaultSkipLocation = schoolSettings ? !!schoolSettings.location_auth_enabled : false;
+      const defaultSkipFace = schoolSettings ? !schoolSettings.face_auth_enabled : false;
+      const defaultSkipLocation = schoolSettings ? !schoolSettings.location_auth_enabled : false;
 
       const user = await User.create({
         name,
@@ -153,6 +153,18 @@ export const updateFacultySettings = async (req, res) => {
       return res.status(404).json({ status: false, message: 'Faculty member not found' });
     }
 
+    // Fetch school settings to validate skip overrides
+    const schoolSettings = await SchoolSettings.findOne();
+    const faceAuthEnabled = schoolSettings ? schoolSettings.face_auth_enabled !== false : true;
+    const locationAuthEnabled = schoolSettings ? schoolSettings.location_auth_enabled !== false : true;
+
+    if (!faceAuthEnabled && skip_face === true) {
+      return res.status(400).json({ status: false, message: 'Cannot enable Skip Face because Face Authentication is globally disabled.' });
+    }
+    if (!locationAuthEnabled && skip_location === true) {
+      return res.status(400).json({ status: false, message: 'Cannot enable Skip Location because Location Authentication is globally disabled.' });
+    }
+
     // Update attributes
     if (name) faculty.name = name;
     if (email) faculty.email = email;
@@ -172,8 +184,20 @@ export const updateFacultySettings = async (req, res) => {
     if (faculty.user) {
       const userUpdate = {};
       if (isActive !== undefined) userUpdate.isActive = isActive;
-      if (skip_face !== undefined) userUpdate.skip_face = skip_face;
-      if (skip_location !== undefined) userUpdate.skip_location = skip_location;
+      
+      // Enforce settings checks
+      if (!faceAuthEnabled) {
+        userUpdate.skip_face = false;
+      } else if (skip_face !== undefined) {
+        userUpdate.skip_face = skip_face;
+      }
+
+      if (!locationAuthEnabled) {
+        userUpdate.skip_location = false;
+      } else if (skip_location !== undefined) {
+        userUpdate.skip_location = skip_location;
+      }
+
       if (targetRole) userUpdate.role = targetRole.toLowerCase();
       
       if (Object.keys(userUpdate).length > 0) {

@@ -25,6 +25,7 @@ cryptography>=41.0.0
 # Validation & Settings
 pydantic[email]>=2.5.0
 pydantic-settings>=2.1.0
+tzdata>=2023.3
 
 # CORS & Security
 python-multipart>=0.0.6

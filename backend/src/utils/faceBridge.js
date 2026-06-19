@@ -37,7 +37,7 @@ export const runFaceCLI = (action, args = {}) => {
       }
       
       if (code !== 0) {
-        return reject(new Error(`Python Face CLI failed with exit code ${code}. Stderr: ${stderrData}`));
+        return reject(new Error(`Python Face CLI failed with exit code ${code}. Stdout: "${stdoutData.trim()}". Stderr: ${stderrData}`));
       }
 
       try {
@@ -49,6 +49,10 @@ export const runFaceCLI = (action, args = {}) => {
     });
 
     // Write request JSON to stdin
+    pyProcess.stdin.on('error', (err) => {
+      console.error('Python Face CLI stdin write error:', err);
+    });
+
     pyProcess.stdin.write(JSON.stringify({ action, args }));
     pyProcess.stdin.end();
   });

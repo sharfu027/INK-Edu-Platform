@@ -23,6 +23,10 @@ import { startComplianceJob } from './src/utils/complianceJob.js';
 
 dotenv.config();
 
+if (process.env.DEBUG) {
+  process.env.DEBUG = process.env.DEBUG.toLowerCase();
+}
+
 const app = express();
 const server = http.createServer(app);
 
@@ -43,6 +47,18 @@ if (!fs.existsSync(uploadsDir)) {
 
 // Global Middlewares
 app.use(cors());
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  const originalJson = res.json;
+  res.json = function (body) {
+    console.log(`Response Status: ${res.statusCode}, Body:`, JSON.stringify(body).slice(0, 500));
+    return originalJson.apply(this, arguments);
+  };
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
 app.use(express.json({ limit: '50mb' })); // Support base64 image payloads
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -141,9 +157,9 @@ server.listen(PORT, '0.0.0.0', () => {
         console.log('Vidya AI Backend is already running on port 8081.');
       }
 
-      const frontendRunning = await isPortOpen(3001);
+      const frontendRunning = await isPortOpen(3002);
       if (!frontendRunning) {
-        console.log('Spawning Vidya AI Frontend on port 3001...');
+        console.log('Spawning Vidya AI Frontend on port 3002...');
         const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
         
         const frontendLogPath = path.join(process.cwd(), 'vidya_frontend.log');
@@ -154,7 +170,7 @@ server.listen(PORT, '0.0.0.0', () => {
           shell: true,
           env: {
             ...process.env,
-            PORT: '3001',
+            PORT: '3002',
             BROWSER: 'none'
           }
         });
@@ -165,7 +181,7 @@ server.listen(PORT, '0.0.0.0', () => {
           console.log(`Vidya AI Frontend exited with code ${code} and signal ${signal}`);
         });
       } else {
-        console.log('Vidya AI Frontend is already running on port 3001.');
+        console.log('Vidya AI Frontend is already running on port 3002.');
       }
     } catch (err) {
       console.error('Failed to auto-start Vidya AI services:', err);

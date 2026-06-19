@@ -104,11 +104,15 @@ export const updateSettings = async (req, res) => {
     if (small_break_mins !== undefined) settings.small_break_mins = small_break_mins;
     if (face_auth_enabled !== undefined) {
       settings.face_auth_enabled = face_auth_enabled;
-      await User.updateMany({}, { skip_face: face_auth_enabled });
+      if (!face_auth_enabled) {
+        await User.updateMany({}, { skip_face: false });
+      }
     }
     if (location_auth_enabled !== undefined) {
       settings.location_auth_enabled = location_auth_enabled;
-      await User.updateMany({}, { skip_location: location_auth_enabled });
+      if (!location_auth_enabled) {
+        await User.updateMany({}, { skip_location: false });
+      }
     }
     if (boardsList) settings.boardsList = boardsList;
     if (standardsList) settings.standardsList = standardsList;

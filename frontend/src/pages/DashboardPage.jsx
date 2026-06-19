@@ -5,7 +5,7 @@
  *   2. Principal/HOD/Admin View: Classroom Live Operations Feed (classes running, absent teachers, alternate assignments).
  * Fully responsive: uses glassmorphism panels, micro-animations, and gold/stone accents.
  */
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { 
   getTeacherDashboard, 
@@ -28,7 +28,8 @@ import {
   createTimetableEntry,
   updateTimetableEntry,
   deleteTimetableEntry,
-  getClassHistory
+  getClassHistory,
+  getCompanySettings
 } from '../services/authService';
 import Spinner from '../components/ui/Spinner';
 import { useNavigate } from 'react-router-dom';
@@ -46,9 +47,10 @@ const DashboardPage = () => {
   const [adminData, setAdminData] = useState(null);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [settings, setSettings] = useState(null);
 
   // Monitoring Dashboard States
-  const [activeSubTab, setActiveSubTab] = useState('overview'); // 'overview', 'live_monitoring', 'weekly_timetable', 'teacher_schedule', 'class_schedule', 'activity_logs'
+  const [activeSubTab, setActiveSubTab] = useState('current_period'); // 'current_period', 'today_timetable', 'weekly_timetable', 'teacher_schedule', 'class_schedule', 'activity_logs'
   const [monitoringStats, setMonitoringStats] = useState({
     totalScheduled: 0,
     onTime: 0,
@@ -120,21 +122,100 @@ const DashboardPage = () => {
   const [schedType, setSchedType] = useState('auto'); // 'auto' or 'manual'
   const [isSubmittingSchedule, setIsSubmittingSchedule] = useState(false);
 
-  const defaultTimeSlots = {
-    1: '09:00-09:45',
-    2: '09:45-10:30',
-    3: '10:45-11:30',
-    4: '11:30-12:15',
-    5: '13:00-13:45',
-    6: '13:45-14:30',
-    7: '14:45-15:30',
-    8: '15:30-16:15'
-  };
+  // Dynamic period timings loader
+  const periodsList = useMemo(() => {
+    const list = [];
+    const seen = new Set();
+    
+    const parseTimeToMinutes = (timeStr) => {
+      if (!timeStr) return 0;
+      const cleanStr = timeStr.trim().toUpperCase();
+      const isPM = cleanStr.includes('PM');
+      const isAM = cleanStr.includes('AM');
+      const timePart = cleanStr.replace(/[AMP\s]/g, '').trim();
+      const [hStr, mStr] = timePart.split(':');
+      let hours = parseInt(hStr, 10) || 0;
+      const minutes = parseInt(mStr, 10) || 0;
+      if (isPM && hours < 12) hours += 12;
+      if (isAM && hours === 12) hours = 0;
+      return hours * 60 + minutes;
+    };
+
+    (timetableEntries || []).forEach(entry => {
+      const p = entry.period;
+      if (!p || seen.has(p)) return;
+      
+      const timeSlot = entry.timeSlot || '';
+      const startStr = entry.startTime || timeSlot.split('-')[0] || '';
+      const endStr = entry.endTime || timeSlot.split('-')[1] || '';
+      
+      if (startStr && endStr) {
+        list.push({
+          period: p,
+          start: startStr.trim(),
+          end: endStr.trim(),
+          startMin: parseTimeToMinutes(startStr),
+          endMin: parseTimeToMinutes(endStr)
+        });
+        seen.add(p);
+      }
+    });
+
+    if (list.length === 0 && settings) {
+      const startTimeStr = settings.office_start_time || settings.timings?.start || '09:00';
+      const periodDuration = settings.game_period_mins || 45;
+      const lunchDuration = settings.lunch_break_mins || 45;
+      const smallBreakDuration = settings.small_break_mins || 15;
+      const totalPeriods = settings.hours_per_day || 8;
+      
+      const [startH, startM] = startTimeStr.split(':').map(Number);
+      let currentMins = startH * 60 + startM;
+      
+      const formatMinToTimeStr = (mins) => {
+        const h = Math.floor(mins / 60) % 24;
+        const m = mins % 60;
+        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+      };
+      
+      let periodIndex = 1;
+      while (periodIndex <= totalPeriods) {
+        const start = formatMinToTimeStr(currentMins);
+        currentMins += periodDuration;
+        const end = formatMinToTimeStr(currentMins);
+        
+        list.push({
+          period: periodIndex,
+          start,
+          end,
+          startMin: currentMins - periodDuration,
+          endMin: currentMins
+        });
+        
+        if (periodIndex === 2 || periodIndex === 6) {
+          currentMins += smallBreakDuration;
+        } else if (periodIndex === 4) {
+          currentMins += lunchDuration;
+        }
+        
+        periodIndex++;
+      }
+    }
+
+    return list.sort((a, b) => a.period - b.period);
+  }, [timetableEntries, settings]);
+
+  const dynamicTimeSlots = useMemo(() => {
+    const slots = {};
+    periodsList.forEach(p => {
+      slots[p.period] = `${p.start}-${p.end}`;
+    });
+    return slots;
+  }, [periodsList]);
 
   const handlePeriodChange = (p) => {
     setSchedPeriod(p);
-    if (defaultTimeSlots[p]) {
-      setSchedTimeSlot(defaultTimeSlots[p]);
+    if (dynamicTimeSlots[p]) {
+      setSchedTimeSlot(dynamicTimeSlots[p]);
     }
   };
 
@@ -206,6 +287,121 @@ const DashboardPage = () => {
     }
   };
 
+  // Real-time active period states
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const clock = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(clock);
+  }, []);
+
+  const formatTime12Hour = (date) => {
+    let hours = date.getHours();
+    let minutes = date.getMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // hour '0' should be '12'
+    minutes = minutes < 10 ? '0' + minutes : minutes;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+  };
+
+
+
+  // Determine current active period info dynamically
+  const periodInfo = useMemo(() => {
+    const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+    
+    // Find active period
+    const activePeriod = periodsList.find(p => currentMinutes >= p.startMin && currentMinutes < p.endMin);
+
+    if (activePeriod) {
+      const remaining = activePeriod.endMin - currentMinutes;
+      return {
+        active: true,
+        period: activePeriod.period,
+        timeSlot: `${activePeriod.start} - ${activePeriod.end}`,
+        startTime: activePeriod.start,
+        endTime: activePeriod.end,
+        remaining
+      };
+    }
+
+    // Find next period if currently in break
+    const nextPeriod = periodsList.find(p => currentMinutes < p.startMin);
+    if (nextPeriod) {
+      const isBeforeSchool = currentMinutes < 9 * 60;
+      const remaining = nextPeriod.startMin - currentMinutes;
+      return {
+        active: false,
+        isBreak: !isBeforeSchool,
+        isBeforeSchool,
+        period: nextPeriod.period,
+        timeSlot: `${nextPeriod.start} - ${nextPeriod.end}`,
+        startTime: nextPeriod.start,
+        endTime: nextPeriod.end,
+        remaining,
+        message: isBeforeSchool ? "Before School Starts" : "Break Time"
+      };
+    }
+
+    // After school
+    return {
+      active: false,
+      isAfterSchool: true,
+      period: null,
+      timeSlot: 'N/A',
+      startTime: 'N/A',
+      endTime: 'N/A',
+      remaining: 0,
+      message: 'School Hours Ended'
+    };
+  }, [currentTime, periodsList]);
+
+  // Compute stats for current active period
+  const activePeriodStats = useMemo(() => {
+    const activeP = periodInfo.period;
+    if (!activeP) {
+      return { running: 0, activeTeachers: 0, late: 0, absent: 0, substitute: 0 };
+    }
+    
+    const activeClasses = classStatuses.filter(c => c.period === activeP);
+    const running = activeClasses.filter(c => ['green', 'yellow', 'purple'].includes(c.statusColor)).length;
+    const activeTeachers = running;
+    const late = activeClasses.filter(c => c.statusColor === 'yellow').length;
+    const absent = activeClasses.filter(c => c.statusColor === 'red').length;
+    const substitute = activeClasses.filter(c => c.statusColor === 'purple').length;
+    
+    return { running, activeTeachers, late, absent, substitute };
+  }, [classStatuses, periodInfo.period]);
+
+  const activePeriodClasses = useMemo(() => {
+    const activeP = periodInfo.period;
+    if (!activeP) return [];
+    return classStatuses.filter(c => c.period === activeP);
+  }, [classStatuses, periodInfo.period]);
+
+  // Search query (declared before useMemo that depends on it)
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const filteredActivePeriodClasses = useMemo(() => {
+    return activePeriodClasses.filter(c => {
+      const matchesClass = monClassId === 'All' || c.classId === monClassId;
+      const matchesTeacher = monTeacherId === 'All' || c.assignedTeacherId === monTeacherId || c.currentTeacherId === monTeacherId;
+      const matchesSubject = monSubjectId === 'All' || c.subjectId === monSubjectId;
+      
+      const query = searchQuery.trim().toLowerCase();
+      const matchesSearch = !query ||
+        c.className.toLowerCase().includes(query) ||
+        c.assignedTeacherName.toLowerCase().includes(query) ||
+        c.currentTeacherName.toLowerCase().includes(query) ||
+        c.subjectName.toLowerCase().includes(query);
+        
+      return matchesClass && matchesTeacher && matchesSubject && matchesSearch;
+    });
+  }, [activePeriodClasses, monClassId, monTeacherId, monSubjectId, searchQuery]);
+
   // Substitute Allocation Modal State
   const [activeRequest, setActiveRequest] = useState(null); // LeaveRequest currently being reviewed
   const [suggestions, setSuggestions] = useState([]); // suggested substitutes per period
@@ -216,7 +412,6 @@ const DashboardPage = () => {
   // Live grid coverage filters
   const [selectedStandard, setSelectedStandard] = useState('All');
   const [selectedSection, setSelectedSection] = useState('All');
-  const [searchQuery, setSearchQuery] = useState('');
 
   // Registered classes, mappings, and UI active card states
   const [allClasses, setAllClasses] = useState([]);
@@ -308,11 +503,10 @@ const DashboardPage = () => {
         subjectId: monSubjectId
       };
       
-      const [statusRes, statsRes, logsRes, ttRes] = await Promise.all([
+      const [statusRes, statsRes, logsRes] = await Promise.all([
         getClassStatus(params),
         getMonitoringStats(monDate),
-        getAuditLogs(),
-        getTimetables()
+        getAuditLogs()
       ]);
 
       if (statusRes?.status) {
@@ -323,9 +517,6 @@ const DashboardPage = () => {
       }
       if (logsRes?.status) {
         setAuditLogs(logsRes.data);
-      }
-      if (ttRes?.status) {
-        setTimetableEntries(ttRes.data);
       }
     } catch (err) {
       console.error('Failed to fetch monitoring data:', err);
@@ -339,6 +530,23 @@ const DashboardPage = () => {
     if (showLoader) setLoading(true);
     // Always load teacher schedule for any logged-in user (all faculty have schedules)
     await fetchTeacherData();
+    
+    // Always fetch dynamic configuration settings and timetables for all roles
+    try {
+      const [settingsResult, ttResult] = await Promise.allSettled([
+        getCompanySettings(),
+        getTimetables()
+      ]);
+      if (settingsResult.status === 'fulfilled' && settingsResult.value?.status && settingsResult.value.data) {
+        setSettings(settingsResult.value.data);
+      }
+      if (ttResult.status === 'fulfilled' && ttResult.value?.status) {
+        setTimetableEntries(ttResult.value.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch timetable timings or company settings:', err);
+    }
+
     // Additionally load admin panel data for privileged roles
     if (['admin', 'principal', 'hod'].includes(user?.role?.toLowerCase()) || user?.isAdmin) {
       await fetchAdminData();
@@ -353,6 +561,15 @@ const DashboardPage = () => {
     const timer = setInterval(() => refreshDashboard(false), 30000);
     return () => clearInterval(timer);
   }, [refreshDashboard]);
+
+  // Automatic period switcher
+  const lastPeriodRef = useRef(periodInfo.period);
+  useEffect(() => {
+    if (periodInfo.period !== lastPeriodRef.current) {
+      lastPeriodRef.current = periodInfo.period;
+      refreshDashboard(false);
+    }
+  }, [periodInfo.period, refreshDashboard]);
 
   // Load monitoring data when filters change or trigger updates or switching tab
   useEffect(() => {
@@ -702,8 +919,8 @@ const DashboardPage = () => {
       classId: classId || (entry?.class?._id || entry?.class || ''),
       day,
       period,
-      startTime: entry?.startTime || defaultTimeSlots[period]?.split('-')[0] || '09:00',
-      endTime: entry?.endTime || defaultTimeSlots[period]?.split('-')[1] || '09:45',
+      startTime: entry?.startTime || (dynamicTimeSlots[period] ? dynamicTimeSlots[period].split('-')[0] : '09:00'),
+      endTime: entry?.endTime || (dynamicTimeSlots[period] ? dynamicTimeSlots[period].split('-')[1] : '09:45'),
       teacherId: entry?.teacher?._id || '',
       subjectId: entry?.subject?._id || ''
     });
@@ -817,7 +1034,7 @@ const DashboardPage = () => {
       const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       
       for (let p = 1; p <= 7; p++) {
-        const row = [`Period ${p}`, defaultTimeSlots[p] || ''];
+        const row = [`Period ${p}`, dynamicTimeSlots[p] || ''];
         days.forEach(day => {
           const entry = timetableEntries.find(e => 
             e.day === day && 
@@ -941,7 +1158,7 @@ const DashboardPage = () => {
             ${[1, 2, 3, 4, 5, 6, 7].map(p => `
               <tr>
                 <td><strong>Period ${p}</strong></td>
-                <td class="time-slot">${defaultTimeSlots[p] || ''}</td>
+                <td class="time-slot">${dynamicTimeSlots[p] || ''}</td>
                 ${days.map(day => {
                   const entry = timetableEntries.find(e => 
                     e.day === day && 
@@ -1422,8 +1639,8 @@ const DashboardPage = () => {
               {/* Sub-tab Navigation */}
               <div className="flex border-b border-stone-200 gap-4 mb-2 no-print overflow-x-auto scrollbar-thin">
                 {[
-                  { id: 'overview', label: '📊 Overview' },
-                  { id: 'live_monitoring', label: '⚡ Live Monitoring' },
+                  { id: 'current_period', label: '⚡ Current Period' },
+                  { id: 'today_timetable', label: "📅 Today's Timetable" },
                   { id: 'weekly_timetable', label: '📅 Weekly Timetable' },
                   { id: 'teacher_schedule', label: '👤 Teacher Schedule' },
                   { id: 'class_schedule', label: '🏫 Class Schedule' },
@@ -1444,8 +1661,283 @@ const DashboardPage = () => {
                 ))}
               </div>
 
-              {/* 1. OVERVIEW SUB-TAB */}
-              {activeSubTab === 'overview' && (
+              {/* 1. CURRENT PERIOD SUB-TAB */}
+              {activeSubTab === 'current_period' && (
+                <div className="space-y-6 animate-fadeIn">
+                  
+                  {/* Live Header Card */}
+                  <div className="bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border border-amber-200 shadow-md rounded-2xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                    <div className="space-y-1">
+                      <div className="text-xs font-bold uppercase tracking-widest text-amber-600">
+                        ⚡ Real-Time Active Period Monitoring
+                      </div>
+                      <h3 className="text-2xl font-black text-stone-900 flex items-center gap-2">
+                        {periodInfo.active ? (
+                          <>
+                            <span>🔔</span> Period {periodInfo.period} in Progress
+                          </>
+                        ) : periodInfo.isBreak ? (
+                          <>
+                            <span>⏳</span> Recess / Break Time
+                          </>
+                        ) : periodInfo.isBeforeSchool ? (
+                          <>
+                            <span>🌅</span> School Starts Soon
+                          </>
+                        ) : (
+                          <>
+                            <span>🚪</span> School Hours Ended
+                          </>
+                        )}
+                      </h3>
+                      <p className="text-stone-550 text-xs font-medium">
+                        {periodInfo.active ? (
+                          `Scheduled duration: ${periodInfo.timeSlot}`
+                        ) : periodInfo.isBreak ? (
+                          `Next Period starts at ${periodInfo.startTime}`
+                        ) : periodInfo.isBeforeSchool ? (
+                          `First Period starts at ${periodInfo.startTime}`
+                        ) : (
+                          "All regular class schedules completed for the day"
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-4 bg-white border border-stone-250 p-4 rounded-xl shadow-sm">
+                      <div className="text-right">
+                        <span className="text-[10px] text-stone-400 font-bold uppercase block">Current Time</span>
+                        <span className="text-base font-extrabold text-stone-900">{formatTime12Hour(currentTime)}</span>
+                      </div>
+                      <div className="w-px h-8 bg-stone-200" />
+                      <div>
+                        {periodInfo.remaining > 0 ? (
+                          <>
+                            <span className="text-[10px] text-stone-400 font-bold uppercase block">
+                              {periodInfo.active ? 'Remaining Time' : 'Starts In'}
+                            </span>
+                            <span className="text-lg font-black text-amber-600 animate-pulse">
+                              ⏳ {periodInfo.remaining} Mins
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-[10px] text-stone-400 font-bold uppercase block">Status</span>
+                            <span className="text-sm font-black text-stone-500 uppercase">Offline</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 5 Period-Specific Stats Counters */}
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                    <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 flex flex-col justify-between transition-all hover:shadow-md">
+                      <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-stone-500">Classes Running</span>
+                      <span className="text-3xl font-extrabold text-stone-900 mt-2">{activePeriodStats.running}</span>
+                    </div>
+                    <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 flex flex-col justify-between transition-all hover:shadow-md">
+                      <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-emerald-600">Teachers Active</span>
+                      <span className="text-3xl font-extrabold text-emerald-600 mt-2">{activePeriodStats.activeTeachers}</span>
+                    </div>
+                    <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 flex flex-col justify-between transition-all hover:shadow-md">
+                      <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-amber-600 font-extrabold">Late Classes</span>
+                      <span className="text-3xl font-extrabold text-amber-600 mt-2">{activePeriodStats.late}</span>
+                    </div>
+                    <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 flex flex-col justify-between transition-all hover:shadow-md">
+                      <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-rose-605">Absent / Delayed</span>
+                      <span className="text-3xl font-extrabold text-rose-605 mt-2">{activePeriodStats.absent}</span>
+                    </div>
+                    <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 flex flex-col justify-between transition-all hover:shadow-md">
+                      <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-purple-650">Substitutes Active</span>
+                      <span className="text-3xl font-extrabold text-purple-650 mt-2">{activePeriodStats.substitute}</span>
+                    </div>
+                  </div>
+
+                  {/* Filters Bar (no date filter) */}
+                  <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+                      <h4 className="text-stone-850 text-xs font-bold uppercase tracking-wider flex items-center gap-2">
+                        🔍 Active Period Filters
+                      </h4>
+                      <input
+                        type="text"
+                        placeholder="Search standard, subject, or teacher..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="bg-stone-50 border border-stone-200 text-stone-850 text-xs rounded-xl px-4 py-2 outline-none focus:border-amber-500 font-medium transition-all w-full sm:w-64"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1.5">Class Filter</label>
+                        <select
+                          value={monClassId}
+                          onChange={(e) => setMonClassId(e.target.value)}
+                          className="w-full bg-stone-50 border border-stone-200 text-stone-850 text-xs rounded-xl px-4 py-3 outline-none focus:border-amber-500 font-medium transition-all"
+                        >
+                          <option value="All">All Classes</option>
+                          {allClasses.map((c) => (
+                            <option key={c._id} value={c._id}>
+                              {c.standard} - {c.section} ({c.board})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1.5">Teacher Filter</label>
+                        <select
+                          value={monTeacherId}
+                          onChange={(e) => setMonTeacherId(e.target.value)}
+                          className="w-full bg-stone-50 border border-stone-200 text-stone-850 text-xs rounded-xl px-4 py-3 outline-none focus:border-amber-500 font-medium transition-all"
+                        >
+                          <option value="All">All Teachers</option>
+                          {teachersList.map((t) => (
+                            <option key={t._id} value={t._id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1.5">Subject Filter</label>
+                        <select
+                          value={monSubjectId}
+                          onChange={(e) => setMonSubjectId(e.target.value)}
+                          className="w-full bg-stone-50 border border-stone-200 text-stone-850 text-xs rounded-xl px-4 py-3 outline-none focus:border-amber-500 font-medium transition-all"
+                        >
+                          <option value="All">All Subjects</option>
+                          {subjectsList.map((s) => (
+                            <option key={s._id} value={s._id}>
+                              {s.name} ({s.code})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Cards Grid */}
+                  <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-6">
+                    <div className="flex justify-between items-center mb-6">
+                      <div>
+                        <h3 className="text-base font-bold text-stone-900 flex items-center gap-2">
+                          🏫 Active Period Operations Grid
+                        </h3>
+                        <p className="text-stone-550 text-xs mt-1">Displays live classroom slots running in Period {periodInfo.period || 'N/A'}.</p>
+                      </div>
+                      {monitoringLoading && (
+                        <span className="flex items-center gap-1.5 text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                          <span className="w-3 h-3 border-2 border-amber-600 border-t-transparent rounded-full animate-spin"></span>
+                          Updating...
+                        </span>
+                      )}
+                    </div>
+
+                    {!periodInfo.active ? (
+                      <div className="py-16 text-center bg-stone-50 rounded-2xl border border-dashed border-stone-200">
+                        <span className="text-4xl block mb-2">⏳</span>
+                        <h4 className="font-extrabold text-stone-700 text-sm">No Active Period Right Now</h4>
+                        <p className="text-stone-400 text-xs italic mt-1 font-bold">
+                          {periodInfo.isBreak ? `Currently in Recess. Next Period starts in ${periodInfo.remaining} mins.` : periodInfo.message || 'School is not in session'}
+                        </p>
+                      </div>
+                    ) : filteredActivePeriodClasses.length === 0 ? (
+                      <div className="py-16 text-center bg-stone-50 rounded-2xl border border-dashed border-stone-200">
+                        <span className="text-4xl block mb-2">📭</span>
+                        <p className="text-stone-400 text-xs italic font-bold">No running classes match the selected filters for this period.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-1">
+                        {filteredActivePeriodClasses.map((card, index) => {
+                          let colorClass = 'border-stone-200 bg-stone-50/50 text-stone-500';
+                          let glowClass = 'bg-stone-300';
+                          let statusLabelColor = 'bg-stone-100 text-stone-700 border-stone-200';
+
+                          if (card.statusColor === 'green') {
+                            colorClass = 'border-emerald-250 bg-emerald-50/30 text-emerald-800 shadow-sm';
+                            glowClass = 'bg-emerald-500 shadow-lg shadow-emerald-500/55';
+                            statusLabelColor = 'bg-emerald-100 text-emerald-805 border-emerald-200';
+                          } else if (card.statusColor === 'red') {
+                            colorClass = 'border-rose-200 bg-rose-50/30 text-rose-805 shadow-sm';
+                            glowClass = 'bg-rose-500 shadow-lg shadow-rose-500/55';
+                            statusLabelColor = 'bg-rose-100 text-rose-850 border-rose-200';
+                          } else if (card.statusColor === 'yellow') {
+                            colorClass = 'border-amber-250 bg-amber-50/30 text-amber-805 shadow-sm';
+                            glowClass = 'bg-amber-500 shadow-lg shadow-amber-500/55';
+                            statusLabelColor = 'bg-amber-100 text-amber-850 border-amber-200';
+                          } else if (card.statusColor === 'purple') {
+                            colorClass = 'border-purple-200 bg-purple-50/30 text-purple-800 shadow-sm';
+                            glowClass = 'bg-purple-500 shadow-lg shadow-purple-500/55';
+                            statusLabelColor = 'bg-purple-100 text-purple-800 border-purple-200';
+                          } else if (card.statusColor === 'blue') {
+                            colorClass = 'border-sky-200 bg-sky-50/30 text-sky-850 shadow-sm';
+                            glowClass = 'bg-sky-500 shadow-lg shadow-sky-500/55';
+                            statusLabelColor = 'bg-sky-100 text-sky-855 border-sky-200';
+                          }
+
+                          return (
+                            <div 
+                              key={index}
+                              onClick={() => {
+                                setSelectedCardDetails(card);
+                                fetchClassHistoryForModal(card.classId);
+                                setIsCardDetailsModalOpen(true);
+                              }}
+                              className={`border rounded-2xl p-4 flex flex-col justify-between gap-4 transition-all duration-300 hover:shadow-md cursor-pointer ${colorClass}`}
+                            >
+                              <div className="space-y-1">
+                                <div className="flex justify-between items-start gap-2">
+                                  <div className="truncate">
+                                    <h4 className="font-extrabold text-sm text-stone-900 truncate">{card.className}</h4>
+                                    <p className="text-stone-500 text-[10px] font-bold uppercase tracking-wider mt-0.5 truncate">{card.subjectName}</p>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <span className={`w-2.5 h-2.5 rounded-full ${glowClass} animate-pulse`} />
+                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold tracking-wider border uppercase whitespace-nowrap ${statusLabelColor}`}>
+                                      {card.statusText}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 bg-white/70 p-2.5 rounded-xl border border-stone-200/50 text-xs mt-3">
+                                  <div className="border-r border-stone-200/50 pr-1 truncate">
+                                    <span className="text-[10px] text-stone-405 font-bold block uppercase tracking-wide">Assigned Teacher</span>
+                                    <span className="font-bold text-stone-850 truncate block mt-0.5" title={card.assignedTeacherName}>
+                                      👤 {card.assignedTeacherName}
+                                    </span>
+                                  </div>
+                                  <div className="pl-1 truncate">
+                                    <span className="text-[10px] text-stone-405 font-bold block uppercase tracking-wide">Current Teacher</span>
+                                    <span className={`font-bold truncate block mt-0.5 ${
+                                      card.statusColor === 'yellow' ? 'text-amber-655' : card.statusColor === 'red' ? 'text-rose-600' : 'text-stone-850'
+                                    }`} title={card.currentTeacherName}>
+                                      👤 {card.currentTeacherName}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex justify-between items-center text-[10px] text-stone-455 border-t border-stone-200/40 pt-2 font-mono">
+                                <span>⏰ Period {card.period} ({card.timeSlot})</span>
+                                <span className="whitespace-nowrap">
+                                  {card.lastUpdatedTime ? (
+                                    `Updated: ${new Date(card.lastUpdatedTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                                  ) : (
+                                    'Not Logged'
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 2. TODAY'S TIMETABLE SUB-TAB */}
+              {activeSubTab === 'today_timetable' && (
                 <div className="space-y-6 animate-fadeIn">
                   
                   {/* Statistics Grid */}
@@ -1463,8 +1955,8 @@ const DashboardPage = () => {
                       <span className="text-3xl font-extrabold text-sky-650 mt-2">{availableTeachers}</span>
                     </div>
                     <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 flex flex-col justify-between transition-all hover:shadow-md">
-                      <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-rose-650">Absent Teachers</span>
-                      <span className="text-3xl font-extrabold text-rose-650 mt-2">{absentTeachers}</span>
+                      <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-rose-655">Absent Teachers</span>
+                      <span className="text-3xl font-extrabold text-rose-655 mt-2">{absentTeachers}</span>
                     </div>
                     <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 flex flex-col justify-between transition-all hover:shadow-md">
                       <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-emerald-600">On Time</span>
@@ -1479,14 +1971,13 @@ const DashboardPage = () => {
                       <span className="text-3xl font-extrabold text-rose-650 mt-2">{absent}</span>
                     </div>
                     <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 flex flex-col justify-between transition-all hover:shadow-md">
-                      <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-purple-650">Substitute Active</span>
-                      <span className="text-3xl font-extrabold text-purple-650 mt-2">{substituteActive}</span>
+                      <span className="text-stone-555 text-[10px] font-bold uppercase tracking-wider text-purple-655 font-extrabold">Substitute Active</span>
+                      <span className="text-3xl font-extrabold text-purple-655 mt-2">{substituteActive}</span>
                     </div>
                   </div>
 
                   {/* Math Validation Section */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    
                     <div className="bg-emerald-50/40 border border-emerald-200 rounded-2xl p-5 flex items-center justify-between">
                       <div className="space-y-1">
                         <h4 className="text-emerald-800 text-xs font-bold uppercase tracking-wider">Faculty Attendance Validation</h4>
@@ -1512,113 +2003,10 @@ const DashboardPage = () => {
                     </div>
                   </div>
 
-
-                  {/* Quick Status Lists */}
-                  {(() => {
-                    const delayedClasses = classStatuses.filter(c => c.statusColor === 'red' || c.statusColor === 'yellow');
-                    return (
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        
-                        {/* 1. DELAYED CLASSES */}
-                        <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-6">
-                          <h4 className="text-stone-850 text-xs font-bold uppercase tracking-wider mb-4 flex justify-between">
-                            <span>🚨 Delayed Classes</span>
-                            <span className="text-rose-600">({delayedClasses.length})</span>
-                          </h4>
-                          <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                            {delayedClasses.length === 0 ? (
-                              <p className="text-stone-400 text-xs italic py-6 text-center">No delayed classes detected.</p>
-                            ) : (
-                              delayedClasses.map((c, idx) => {
-                                const delayMins = getDelayMinutes(c.timeSlot, c.loginTime, monDate);
-                                return (
-                                  <div key={idx} className="bg-stone-50 border border-stone-150 rounded-xl p-3 flex justify-between items-center text-xs">
-                                    <div className="min-w-0 flex-1">
-                                      <span className="font-extrabold text-stone-900 block truncate">{c.className}</span>
-                                      <span className="text-[10px] text-stone-450 mt-0.5 block truncate">Subject: {c.subjectName} | Period: {c.period}</span>
-                                      <span className="text-[10px] text-stone-550 font-bold block mt-1 truncate">Teacher: {c.assignedTeacherName}</span>
-                                    </div>
-                                    <div className="text-right ml-2 flex-shrink-0">
-                                      <span className="text-[9px] bg-rose-100 text-rose-800 border border-rose-200 px-2 py-0.5 rounded font-extrabold uppercase block text-center">
-                                        Delay: {delayMins} Min
-                                      </span>
-                                      <span className="text-[8px] text-stone-400 mt-1 block font-mono">{c.timeSlot}</span>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                            )}
-                          </div>
-                        </div>
-
-                        {/* 2. CLASSES REQUIRING ATTENTION */}
-                        <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-6">
-                          <h4 className="text-stone-850 text-xs font-bold uppercase tracking-wider mb-4 flex justify-between">
-                            <span>⚠️ Classes Requiring Attendance Attention</span>
-                            <span className="text-rose-600">({absent})</span>
-                          </h4>
-                          <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                            {absent === 0 ? (
-                              <p className="text-stone-400 text-xs italic py-6 text-center">All classes running correctly or have substitutes.</p>
-                            ) : (
-                              classStatuses.filter(c => c.statusColor === 'red').map((c, idx) => (
-                                <div key={idx} className="bg-stone-50 border border-stone-150 rounded-xl p-3 flex justify-between items-center text-xs">
-                                  <div>
-                                    <span className="font-extrabold text-stone-900 block">{c.className}</span>
-                                    <span className="text-[10px] text-stone-450 mt-0.5 block">Subject: {c.subjectName} | Period: {c.period}</span>
-                                  </div>
-                                  <span className="text-[9px] bg-rose-100 text-rose-800 border border-rose-200 px-2 py-0.5 rounded font-extrabold uppercase whitespace-nowrap">
-                                    Absent: {c.assignedTeacherName}
-                                  </span>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-
-                        {/* 3. SUBSTITUTE ASSIGNMENTS */}
-                        <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-6">
-                          <h4 className="text-stone-850 text-xs font-bold uppercase tracking-wider mb-4 flex justify-between">
-                            <span>🔄 Substitute Teacher Assignments</span>
-                            <span className="text-purple-650">({substituteActive})</span>
-                          </h4>
-                          <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                            {substituteActive === 0 ? (
-                              <p className="text-stone-400 text-xs italic py-6 text-center">No substitute arrangements currently active.</p>
-                            ) : (
-                              classStatuses.filter(c => c.statusColor === 'purple').map((c, idx) => (
-                                <div key={idx} className="bg-stone-50 border border-stone-150 rounded-xl p-3 flex justify-between items-center text-xs">
-                                  <div>
-                                    <span className="font-extrabold text-stone-900 block">{c.className}</span>
-                                    <span className="text-[10px] text-stone-450 mt-0.5 block">Subject: {c.subjectName} | Period: {c.period}</span>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-[9px] bg-amber-100 text-amber-805 border border-amber-200 px-2 py-0.5 rounded font-extrabold uppercase block text-center">
-                                      Sub: {c.currentTeacherName}
-                                    </span>
-                                    <span className="text-[8px] text-stone-400 mt-1 block">Assigned: {c.assignedTeacherName}</span>
-                                  </div>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-
-                      </div>
-                    );
-                  })()}
-
-                </div>
-              )}
-
-              {/* 2. LIVE MONITORING SUB-TAB */}
-              {activeSubTab === 'live_monitoring' && (
-                <div className="space-y-6 animate-fadeIn">
-                  
-                  {/* Filters Bar */}
+                  {/* Filters Bar (with date filter) */}
                   <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-6">
                     <h4 className="text-stone-850 text-xs font-bold uppercase tracking-wider mb-4 flex items-center gap-2">
-                      🔍 Live Monitoring Filters
+                      🔍 Daily Monitoring Filters
                     </h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                       <div>
@@ -1683,9 +2071,9 @@ const DashboardPage = () => {
                     <div className="flex justify-between items-center mb-6">
                       <div>
                         <h3 className="text-base font-bold text-stone-900 flex items-center gap-2">
-                          🏫 Ongoing Class Monitoring Cards
+                          🏫 Today's Classroom Monitoring Cards
                         </h3>
-                        <p className="text-stone-500 text-xs mt-1">Click cards to toggle override Login/Logout action controls.</p>
+                        <p className="text-stone-550 text-xs mt-1">Click cards to toggle override Login/Logout action controls.</p>
                       </div>
                       {monitoringLoading && (
                         <span className="flex items-center gap-1.5 text-[10px] text-amber-600 font-bold bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
@@ -1719,6 +2107,14 @@ const DashboardPage = () => {
                             colorClass = 'border-amber-250 bg-amber-50/30 text-amber-805 shadow-sm';
                             glowClass = 'bg-amber-500 shadow-lg shadow-amber-500/55';
                             statusLabelColor = 'bg-amber-100 text-amber-850 border-amber-200';
+                          } else if (card.statusColor === 'purple') {
+                            colorClass = 'border-purple-200 bg-purple-50/30 text-purple-800 shadow-sm';
+                            glowClass = 'bg-purple-500 shadow-lg shadow-purple-500/55';
+                            statusLabelColor = 'bg-purple-100 text-purple-800 border-purple-200';
+                          } else if (card.statusColor === 'blue') {
+                            colorClass = 'border-sky-200 bg-sky-50/30 text-sky-855 shadow-sm';
+                            glowClass = 'bg-sky-500 shadow-lg shadow-sky-500/55';
+                            statusLabelColor = 'bg-sky-100 text-sky-855 border-sky-200';
                           }
 
                           return (
@@ -1735,10 +2131,10 @@ const DashboardPage = () => {
                                 <div className="flex justify-between items-start gap-2">
                                   <div className="truncate">
                                     <h4 className="font-extrabold text-sm text-stone-900 truncate">{card.className}</h4>
-                                    <p className="text-stone-500 text-[10px] font-bold uppercase tracking-wider mt-0.5 truncate">{card.subjectName}</p>
+                                    <p className="text-stone-550 text-[10px] font-bold uppercase tracking-wider mt-0.5 truncate">{card.subjectName}</p>
                                   </div>
                                   <div className="flex items-center gap-1.5 flex-shrink-0">
-                                    <span className={`w-2 h-2 rounded-full ${glowClass} animate-pulse`} />
+                                    <span className={`w-2.5 h-2.5 rounded-full ${glowClass} animate-pulse`} />
                                     <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold tracking-wider border uppercase whitespace-nowrap ${statusLabelColor}`}>
                                       {card.statusText}
                                     </span>
@@ -1755,7 +2151,7 @@ const DashboardPage = () => {
                                   <div className="pl-1 truncate">
                                     <span className="text-[10px] text-stone-405 font-bold block uppercase tracking-wide">Current Teacher</span>
                                     <span className={`font-bold truncate block mt-0.5 ${
-                                      card.statusColor === 'yellow' ? 'text-amber-650' : card.statusColor === 'red' ? 'text-rose-600' : 'text-stone-850'
+                                      card.statusColor === 'yellow' ? 'text-amber-655' : card.statusColor === 'red' ? 'text-rose-600' : 'text-stone-850'
                                     }`} title={card.currentTeacherName}>
                                       👤 {card.currentTeacherName}
                                     </span>
@@ -1894,7 +2290,7 @@ const DashboardPage = () => {
                             <tr key={p} className="border-b border-stone-150 hover:bg-stone-50/40">
                               <td className="py-3 px-4 font-bold text-stone-850 border-r border-stone-200 whitespace-nowrap bg-stone-50/30">
                                 Period {p}
-                                <span className="block text-[10px] text-stone-400 font-mono mt-0.5 font-medium">{defaultTimeSlots[p] || ''}</span>
+                                <span className="block text-[10px] text-stone-400 font-mono mt-0.5 font-medium">{dynamicTimeSlots[p] || ''}</span>
                               </td>
                               {days.map(day => {
                                 const entry = timetableEntries.find(e => 
@@ -2591,7 +2987,7 @@ const DashboardPage = () => {
               <div className="bg-stone-50 px-6 py-4 border-b border-stone-200 flex justify-between items-center">
                 <div>
                   <h3 className="text-base sm:text-lg font-bold text-stone-900">
-                    Timetable Slot: {day}, Period {period} ({defaultTimeSlots[period] || ''})
+                    Timetable Slot: {day}, Period {period} ({dynamicTimeSlots[period] || ''})
                   </h3>
                   <p className="text-xs text-stone-500 font-medium">Class: {className}</p>
                 </div>

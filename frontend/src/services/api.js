@@ -20,6 +20,9 @@ const api = axios.create({
   timeout: 120000, // 120s — Render free tier can take ~50s to cold-start
   headers: {
     'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+    'Expires': '0',
   },
 });
 
@@ -48,12 +51,21 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       const url = error.config?.url || '';
       // Only auto-redirect for expired tokens, not for login/register failures
-      if (!url.includes('/auth/login') && !url.includes('/auth/register')) {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        localStorage.removeItem('user_id');
-        if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
-          window.location.href = '/login';
+      // and not for non-critical settings/config endpoints
+      if (
+        !url.includes('/auth/login') &&
+        !url.includes('/auth/register') &&
+        !url.includes('/auth/settings')
+      ) {
+        // Only wipe if token is actually present (avoid cascade wipe from parallel calls)
+        const currentToken = localStorage.getItem('access_token');
+        if (currentToken) {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('refresh_token');
+          localStorage.removeItem('user_id');
+          if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
+            window.location.href = '/login';
+          }
         }
       }
     }

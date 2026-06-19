@@ -168,8 +168,8 @@ const AdminPage = () => {
     setModalSaving(true);
     try {
       await updateEmployeeSettings(selectedUserDashboard._id, {
-        skip_face: selectedUserDashboard.skip_face,
-        skip_location: selectedUserDashboard.skip_location,
+        skip_face: settings.face_auth_enabled ? selectedUserDashboard.skip_face : false,
+        skip_location: settings.location_auth_enabled ? selectedUserDashboard.skip_location : false,
         is_enabled: selectedUserDashboard.is_enabled,
         role: selectedUserDashboard.role,
         insurance_id: modalInsuranceId.trim(),
@@ -325,12 +325,42 @@ const AdminPage = () => {
     }
   };
 
+  const fetchSettings = useCallback(async () => {
+    try {
+      const res = await getCompanySettings();
+      if (res?.data) {
+        setSettings({
+          schoolName: res.data.schoolName || 'Golden Valley Academy',
+          board: res.data.board || 'CBSE',
+          boardsList: res.data.boardsList || ['CBSE', 'STATE', 'ICSE'],
+          standardsList: res.data.standardsList || ['Nursery', 'LKG', 'UKG', '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th'],
+          face_auth_enabled: res.data.face_auth_enabled !== undefined ? res.data.face_auth_enabled : true,
+          location_auth_enabled: res.data.location_auth_enabled !== undefined ? res.data.location_auth_enabled : true,
+          hours_per_day: res.data.hours_per_day || 8.0,
+          hours_per_week: res.data.hours_per_week || 40.0,
+          hours_per_month: res.data.hours_per_month || 160.0,
+          hours_per_year: res.data.hours_per_year || 1920.0,
+          weekly_off: res.data.weekly_off || 'Sunday',
+          office_start_time: res.data.office_start_time || '08:30',
+          office_end_time: res.data.office_end_time || '16:00',
+          grace_period_mins: res.data.grace_period_mins || 15,
+          hours_per_subject: res.data.hours_per_subject !== undefined ? res.data.hours_per_subject : 1.0,
+          game_period_mins: res.data.game_period_mins !== undefined ? res.data.game_period_mins : 45,
+          lunch_break_mins: res.data.lunch_break_mins !== undefined ? res.data.lunch_break_mins : 45,
+          small_break_mins: res.data.small_break_mins !== undefined ? res.data.small_break_mins : 15
+        });
+      }
+    } catch (err) {
+      console.error("Failed to load settings:", err);
+    }
+  }, []);
+
   const fetchEmployees = useCallback(async () => {
     try {
       setEmpLoading(true);
-      const res = await getAdminEmployees();
-      if (res?.data) {
-        const processed = processEmployeeData(res.data);
+      const empRes = await getAdminEmployees();
+      if (empRes?.data) {
+        const processed = processEmployeeData(empRes.data);
         setEmployees(processed);
         setOriginalEmployees(JSON.parse(JSON.stringify(processed)));
       }
@@ -449,10 +479,14 @@ const AdminPage = () => {
   }, []);
 
   useEffect(() => { 
-    if (activeTab === 'settings') fetchEmployees();
+    if (activeTab === 'settings') {
+      fetchSettings();
+      fetchEmployees();
+    }
     if (activeTab === 'consolidated') fetchConsolidated(); 
     if (activeTab === 'details' || activeTab === 'individual_details') fetchDetails(); 
     if (activeTab === 'employees') {
+      fetchSettings();
       fetchEmployees();
       fetchRoles();
     }
@@ -475,7 +509,7 @@ const AdminPage = () => {
       fetchEmployees();
       fetchSubjects();
     }
-  }, [activeTab, reportMonth, reportYear, deptFilter, dailyStatusDate, fetchDailyStatus, fetchRoles, fetchEmployees, fetchClasses, fetchSubjects, fetchMappings, fetchTimetableEntries]);
+  }, [activeTab, reportMonth, reportYear, deptFilter, dailyStatusDate, fetchDailyStatus, fetchRoles, fetchSettings, fetchEmployees, fetchClasses, fetchSubjects, fetchMappings, fetchTimetableEntries]);
 
   // Real-time polling every 15 seconds
   useEffect(() => {
@@ -484,6 +518,7 @@ const AdminPage = () => {
       else if (activeTab === 'details' || activeTab === 'individual_details') fetchDetailsSilent();
       else if (activeTab === 'employees') {
         getAdminEmployees().then(res => { if (res?.data) setEmployees(processEmployeeData(res.data)); }).catch(() => {});
+        fetchSettings();
       } else if (activeTab === 'daily_status') {
         getDailyStatus(dailyStatusDate).then(res => { if (res?.status && Array.isArray(res.data)) setDailyStatusData(res.data); }).catch(() => {});
       }
@@ -807,8 +842,8 @@ const AdminPage = () => {
     setSavingEmpId(emp._id);
     try {
       await updateEmployeeSettings(emp._id, {
-        skip_face: emp.skip_face,
-        skip_location: emp.skip_location,
+        skip_face: settings.face_auth_enabled ? emp.skip_face : false,
+        skip_location: settings.location_auth_enabled ? emp.skip_location : false,
         is_enabled: emp.is_enabled,
         role: emp.role,
         insurance_id: emp.insurance_id || '',
@@ -943,8 +978,8 @@ const AdminPage = () => {
         experience: editForm.experience,
         status: editForm.status,
         role: editForm.role,
-        skip_face: editForm.skip_face,
-        skip_location: editForm.skip_location,
+        skip_face: settings.face_auth_enabled ? editForm.skip_face : false,
+        skip_location: settings.location_auth_enabled ? editForm.skip_location : false,
         isActive: editForm.isActive
       });
       if (res?.status) {
@@ -976,8 +1011,8 @@ const AdminPage = () => {
     for (const emp of changedEmps) {
       try {
         await updateEmployeeSettings(emp._id, {
-          skip_face: emp.skip_face,
-          skip_location: emp.skip_location,
+          skip_face: settings.face_auth_enabled ? emp.skip_face : false,
+          skip_location: settings.location_auth_enabled ? emp.skip_location : false,
           is_enabled: emp.is_enabled,
           role: emp.role
         });
@@ -1007,29 +1042,7 @@ const AdminPage = () => {
     const loadSettings = async () => {
       if (user?.role !== 'admin') return;
       try {
-        const res = await getCompanySettings();
-        if (res?.data) {
-          setSettings({
-            schoolName: res.data.schoolName || 'Golden Valley Academy',
-            board: res.data.board || 'CBSE',
-            boardsList: res.data.boardsList || ['CBSE', 'STATE', 'ICSE'],
-            standardsList: res.data.standardsList || ['Nursery', 'LKG', 'UKG', '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th'],
-            face_auth_enabled: res.data.face_auth_enabled !== undefined ? res.data.face_auth_enabled : true,
-            location_auth_enabled: res.data.location_auth_enabled !== undefined ? res.data.location_auth_enabled : true,
-            hours_per_day: res.data.hours_per_day || 8.0,
-            hours_per_week: res.data.hours_per_week || 40.0,
-            hours_per_month: res.data.hours_per_month || 160.0,
-            hours_per_year: res.data.hours_per_year || 1920.0,
-            weekly_off: res.data.weekly_off || 'Sunday',
-            office_start_time: res.data.office_start_time || '08:30',
-            office_end_time: res.data.office_end_time || '16:00',
-            grace_period_mins: res.data.grace_period_mins || 15,
-            hours_per_subject: res.data.hours_per_subject !== undefined ? res.data.hours_per_subject : 1.0,
-            game_period_mins: res.data.game_period_mins !== undefined ? res.data.game_period_mins : 45,
-            lunch_break_mins: res.data.lunch_break_mins !== undefined ? res.data.lunch_break_mins : 45,
-            small_break_mins: res.data.small_break_mins !== undefined ? res.data.small_break_mins : 15
-          });
-        }
+        await fetchSettings();
       } catch (err) {
         console.error("Failed to load settings:", err);
       } finally {
@@ -1037,7 +1050,7 @@ const AdminPage = () => {
       }
     };
     loadSettings();
-  }, [user]);
+  }, [user, fetchSettings]);
 
   const handleAdminLogin = async (e) => {
     e.preventDefault();
@@ -1083,11 +1096,8 @@ const AdminPage = () => {
 
   const handleToggleSetting = async (field, val) => {
     const updatedSettings = { ...settings, [field]: val };
+    // Optimistically update settings locally
     setSettings(updatedSettings);
-    
-    // Optimistically update the UI list for immediate feedback
-    const employeeField = field === 'face_auth_enabled' ? 'skip_face' : 'skip_location';
-    setEmployees(prev => (Array.isArray(prev) ? prev : []).map(emp => ({ ...emp, [employeeField]: val })));
     
     try {
       const settingsPayload = {
@@ -1113,19 +1123,16 @@ const AdminPage = () => {
       
       await updateCompanySettings(settingsPayload);
       
-      // Reload from backend to make sure everything is completely in sync and update originalEmployees
-      const empRes = await getAdminEmployees();
-      if (empRes?.data) {
-        const processed = processEmployeeData(empRes.data);
-        setEmployees(processed);
-        setOriginalEmployees(JSON.parse(JSON.stringify(processed)));
-      }
+      // Reload settings and employees from backend to make sure everything is completely in sync
+      await fetchSettings();
+      await fetchEmployees();
       toast.success(`${field === 'face_auth_enabled' ? 'Face' : 'Location'} authentication setting updated globally!`);
     } catch (err) {
       toast.error("Failed to update setting");
       // Revert states on error
       setSettings(settings);
-      fetchEmployees();
+      await fetchSettings();
+      await fetchEmployees();
     }
   };
 
@@ -1186,8 +1193,8 @@ const AdminPage = () => {
         for (const emp of changedEmps) {
           try {
             await updateEmployeeSettings(emp._id, {
-              skip_face: emp.skip_face,
-              skip_location: emp.skip_location,
+              skip_face: settings.face_auth_enabled ? emp.skip_face : false,
+              skip_location: settings.location_auth_enabled ? emp.skip_location : false,
               is_enabled: emp.is_enabled,
               role: emp.role
             });
@@ -1196,10 +1203,11 @@ const AdminPage = () => {
             console.error(`Failed to auto-save settings for ${emp.name}`, err);
           }
         }
-        if (successCount > 0) {
-          setOriginalEmployees(JSON.parse(JSON.stringify(employees)));
-        }
       }
+
+      // Reload settings and employees from backend to make sure everything is completely in sync
+      await fetchSettings();
+      await fetchEmployees();
     } catch (err) {
       toast.error(err.message || "Failed to update settings");
     } finally {
@@ -1251,6 +1259,9 @@ const AdminPage = () => {
       </div>
     );
   }
+
+  console.log('Face Auth:', settings.face_auth_enabled);
+  console.log('Location Auth:', settings.location_auth_enabled);
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col md:flex-row animate-fadeIn font-sans">
@@ -1680,6 +1691,24 @@ const AdminPage = () => {
             </div>
 
             <div className="p-4 sm:p-6">
+              {/* Helper Texts when global configs are disabled */}
+              {(!settings.face_auth_enabled || !settings.location_auth_enabled) && (
+                <div className="mb-6 space-y-2.5">
+                  {!settings.face_auth_enabled && (
+                    <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-sm font-semibold shadow-sm animate-pulse">
+                      <span className="text-base">⚠️</span>
+                      <span>School-level Face Authentication is disabled.</span>
+                    </div>
+                  )}
+                  {!settings.location_auth_enabled && (
+                    <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-sm font-semibold shadow-sm animate-pulse">
+                      <span className="text-base">⚠️</span>
+                      <span>School-level Location Authentication is disabled.</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Search Bar */}
               <div className="mb-6">
                 <input
@@ -1765,11 +1794,16 @@ const AdminPage = () => {
                                 </td>
 
                                 <td className="px-4 py-3.5 text-center">
-                                  <label className="relative inline-flex items-center cursor-pointer">
+                                  <label className={`relative inline-flex items-center ${!settings.face_auth_enabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
                                     <input 
                                       type="checkbox" 
-                                      checked={emp.skip_face} 
-                                      onChange={() => handleEmpToggle(realIdx, 'skip_face')} 
+                                      checked={settings.face_auth_enabled ? emp.skip_face : false} 
+                                      disabled={!settings.face_auth_enabled}
+                                      onChange={() => {
+                                        if (settings.face_auth_enabled) {
+                                          handleEmpToggle(realIdx, 'skip_face');
+                                        }
+                                      }}
                                       className="sr-only peer" 
                                     />
                                     <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -1777,11 +1811,16 @@ const AdminPage = () => {
                                 </td>
 
                                 <td className="px-4 py-3.5 text-center">
-                                  <label className="relative inline-flex items-center cursor-pointer">
+                                  <label className={`relative inline-flex items-center ${!settings.location_auth_enabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}>
                                     <input 
                                       type="checkbox" 
-                                      checked={emp.skip_location} 
-                                      onChange={() => handleEmpToggle(realIdx, 'skip_location')} 
+                                      checked={settings.location_auth_enabled ? emp.skip_location : false} 
+                                      disabled={!settings.location_auth_enabled}
+                                      onChange={() => {
+                                        if (settings.location_auth_enabled) {
+                                          handleEmpToggle(realIdx, 'skip_location');
+                                        }
+                                      }}
                                       className="sr-only peer" 
                                     />
                                     <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -1911,26 +1950,36 @@ const AdminPage = () => {
                             </div>
 
                             <div className="grid grid-cols-2 gap-4 text-xs">
-                              <div className="flex flex-col gap-1 p-3 bg-gray-50 rounded-xl border border-gray-200">
+                              <div className={`flex flex-col gap-1 p-3 bg-gray-50 rounded-xl border border-gray-200 ${!settings.face_auth_enabled ? 'opacity-40' : ''}`}>
                                 <span className="text-gray-500 font-bold">Skip Face</span>
-                                <label className="relative inline-flex items-center cursor-pointer mt-1">
+                                <label className={`relative inline-flex items-center mt-1 ${!settings.face_auth_enabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                                   <input 
                                     type="checkbox" 
-                                    checked={emp.skip_face} 
-                                    onChange={() => handleEmpToggle(realIdx, 'skip_face')} 
+                                    checked={settings.face_auth_enabled ? emp.skip_face : false} 
+                                    disabled={!settings.face_auth_enabled}
+                                    onChange={() => {
+                                      if (settings.face_auth_enabled) {
+                                        handleEmpToggle(realIdx, 'skip_face');
+                                      }
+                                    }}
                                     className="sr-only peer" 
                                   />
                                   <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
                                 </label>
                               </div>
 
-                              <div className="flex flex-col gap-1 p-3 bg-gray-50 rounded-xl border border-gray-200">
+                              <div className={`flex flex-col gap-1 p-3 bg-gray-50 rounded-xl border border-gray-200 ${!settings.location_auth_enabled ? 'opacity-40' : ''}`}>
                                 <span className="text-gray-500 font-bold">Skip Location</span>
-                                <label className="relative inline-flex items-center cursor-pointer mt-1">
+                                <label className={`relative inline-flex items-center mt-1 ${!settings.location_auth_enabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                                   <input 
                                     type="checkbox" 
-                                    checked={emp.skip_location} 
-                                    onChange={() => handleEmpToggle(realIdx, 'skip_location')} 
+                                    checked={settings.location_auth_enabled ? emp.skip_location : false} 
+                                    disabled={!settings.location_auth_enabled}
+                                    onChange={() => {
+                                      if (settings.location_auth_enabled) {
+                                        handleEmpToggle(realIdx, 'skip_location');
+                                      }
+                                    }}
                                     className="sr-only peer" 
                                   />
                                   <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
@@ -3424,22 +3473,59 @@ const AdminPage = () => {
                 </div>
               </div>
 
+              {(!settings.face_auth_enabled || !settings.location_auth_enabled) && (
+                <div className="mb-4 space-y-2">
+                  {!settings.face_auth_enabled && (
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold">
+                      <span>⚠️</span>
+                      <span>School-level Face Authentication is disabled.</span>
+                    </div>
+                  )}
+                  {!settings.location_auth_enabled && (
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold">
+                      <span>⚠️</span>
+                      <span>School-level Location Authentication is disabled.</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <div className={`flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200 ${!settings.face_auth_enabled ? 'opacity-40' : ''}`}>
                   <div>
                     <span className="block text-xs font-bold text-gray-700">Skip Face</span>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" checked={editForm.skip_face} onChange={(e) => setEditForm({ ...editForm, skip_face: e.target.checked })} className="sr-only peer" />
+                  <label className={`relative inline-flex items-center ${!settings.face_auth_enabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                    <input 
+                      type="checkbox" 
+                      checked={settings.face_auth_enabled ? editForm.skip_face : false} 
+                      disabled={!settings.face_auth_enabled}
+                      onChange={(e) => {
+                        if (settings.face_auth_enabled) {
+                          setEditForm({ ...editForm, skip_face: e.target.checked });
+                        }
+                      }}
+                      className="sr-only peer" 
+                    />
                     <div className="w-9 h-5 bg-gray-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
                   </label>
                 </div>
-                <div className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
+                <div className={`flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200 ${!settings.location_auth_enabled ? 'opacity-40' : ''}`}>
                   <div>
                     <span className="block text-xs font-bold text-gray-700">Skip Location</span>
                   </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" checked={editForm.skip_location} onChange={(e) => setEditForm({ ...editForm, skip_location: e.target.checked })} className="sr-only peer" />
+                  <label className={`relative inline-flex items-center ${!settings.location_auth_enabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+                    <input 
+                      type="checkbox" 
+                      checked={settings.location_auth_enabled ? editForm.skip_location : false} 
+                      disabled={!settings.location_auth_enabled}
+                      onChange={(e) => {
+                        if (settings.location_auth_enabled) {
+                          setEditForm({ ...editForm, skip_location: e.target.checked });
+                        }
+                      }}
+                      className="sr-only peer" 
+                    />
                     <div className="w-9 h-5 bg-gray-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
                   </label>
                 </div>
