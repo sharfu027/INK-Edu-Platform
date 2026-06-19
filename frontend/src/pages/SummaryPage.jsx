@@ -47,7 +47,8 @@ const SummaryPage = () => {
     const toastId = toast.loading('Generating topic summary from Gemini AI...');
 
     try {
-      const response = await axios.post('http://localhost:8081/api/summary', {
+      const vidyaAiApiUrl = import.meta.env.VITE_VIDYA_AI_API_URL || 'http://localhost:8081';
+      const response = await axios.post(`${vidyaAiApiUrl}/api/summary`, {
         standard,
         subject,
         topic: topic.trim()

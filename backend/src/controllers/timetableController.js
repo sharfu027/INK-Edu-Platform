@@ -56,12 +56,14 @@ export const createTimetableEntry = async (req, res) => {
     // Validate references
     const cls = await Class.findById(classId);
     if (!cls) return res.status(404).json({ status: false, message: 'Class not found' });
+    if (cls.isActive === false) return res.status(400).json({ status: false, message: 'Cannot schedule a timetable for a deactivated class' });
 
     const teacher = await Teacher.findById(teacherId);
     if (!teacher) return res.status(404).json({ status: false, message: 'Teacher not found' });
 
     const subject = await Subject.findById(subjectId);
     if (!subject) return res.status(404).json({ status: false, message: 'Subject not found' });
+    if (subject.isActive === false) return res.status(400).json({ status: false, message: 'Cannot schedule a timetable with a deactivated subject' });
 
     const periodConf = await PeriodConfiguration.findOne({ periodNumber: period });
     const finalStart = periodConf ? periodConf.startTime : startTime;

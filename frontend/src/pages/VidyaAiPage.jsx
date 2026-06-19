@@ -8,7 +8,7 @@ const VidyaAiPage = () => {
       <div className="flex-1 flex flex-col min-w-0 bg-[#F8F9FA] relative">
         <div className="w-full h-[calc(100vh-4rem)] relative overflow-hidden">
           <iframe
-            src="http://localhost:3002"
+            src={import.meta.env.VITE_VIDYA_AI_FRONTEND_URL || 'http://localhost:3002'}
             title="INK Education AI Assistant"
             className="absolute top-0 left-0 w-full h-full border-none"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; camera"

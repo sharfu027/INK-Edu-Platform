@@ -68,7 +68,8 @@ export default function PaperPage() {
     }
   };
 
-  const isNcertStandard = ["6th", "7th", "8th", "9th", "10th"].includes(ctx.standard);
+  const stdBase = ctx.standard ? ctx.standard.split("-")[0] : "";
+  const isNcertStandard = ["6th", "7th", "8th", "9th", "10th", "6", "7", "8", "9", "10"].includes(stdBase);
 
   useEffect(() => {
     if (!isNcertStandard) {

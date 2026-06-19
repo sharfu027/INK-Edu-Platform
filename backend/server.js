@@ -20,6 +20,7 @@ import leaveRoutes from './src/routes/leaveRoutes.js';
 import dashboardRoutes from './src/routes/dashboardRoutes.js';
 import roleRoutes from './src/routes/roleRoutes.js';
 import periodRoutes from './src/routes/periodRoutes.js';
+import academicYearRoutes from './src/routes/academicYearRoutes.js';
 import { startComplianceJob } from './src/utils/complianceJob.js';
 
 dotenv.config();
@@ -75,6 +76,7 @@ app.use('/api/leaves', leaveRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/periods', periodRoutes);
+app.use('/api/academic-years', academicYearRoutes);
 
 // Error Handling Middleware
 app.use((err, req, res, next) => {
@@ -85,8 +87,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 8000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Node Server running on port ${PORT}`);
-  
-  // Dynamically start Vidya AI services in background if not already running
+  // Trigger restart for Vidya AI backend updates 4
   const isPortOpen = (port) => {
     return new Promise((resolve) => {
       const client = new net.Socket();
@@ -192,3 +193,6 @@ server.listen(PORT, '0.0.0.0', () => {
 
   startVidyaAI();
 });
+
+// Trigger restart 5
+

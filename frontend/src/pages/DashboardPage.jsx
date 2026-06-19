@@ -221,7 +221,7 @@ const DashboardPage = () => {
       }
     }
 
-    return list.sort((a, b) => a.period - b.period);
+    return list.sort((a, b) => (a.startMin - b.startMin) || (a.period - b.period));
   }, [dynamicPeriods, timetableEntries, settings]);
 
   const dynamicTimeSlots = useMemo(() => {
@@ -1056,8 +1056,9 @@ const DashboardPage = () => {
       filename = `weekly_timetable_${selectedTimetableClass}.csv`;
       headers = ['Period', 'Time Slot', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const exportPeriods = periodsList.map(pl => pl.period);
       
-      for (let p = 1; p <= 7; p++) {
+      for (const p of exportPeriods) {
         const row = [`Period ${p}`, dynamicTimeSlots[p] || ''];
         days.forEach(day => {
           const entry = timetableEntries.find(e => 
@@ -1179,7 +1180,7 @@ const DashboardPage = () => {
             </tr>
           </thead>
           <tbody>
-            ${[1, 2, 3, 4, 5, 6, 7].map(p => `
+            ${periodsList.map(pl => pl.period).map(p => `
               <tr>
                 <td><strong>Period ${p}</strong></td>
                 <td class="time-slot">${dynamicTimeSlots[p] || ''}</td>
@@ -1377,7 +1378,7 @@ const DashboardPage = () => {
 
   const schoolStats = useMemo(() => {
     if (!adminData) {
-      return { totalTeachers: 0, currentlyTeaching: 0, availableTeachers: 0, absentTeachers: 0, onTime: 0, late: 0, absent: 0, substituteActive: 0, upcoming: 0, totalScheduled: 0 };
+      return { totalTeachers: 0, currentlyTeaching: 0, availableTeachers: 0, absentTeachers: 0, onTime: 0, late: 0, absent: 0, substituteActive: 0, upcoming: 0, totalScheduled: 0, totalClasses: 0, totalSections: 0, totalSubjects: 0, totalStudents: 0 };
     }
     const onTime = monitoringStats?.onTime || adminData.stats?.greenClasses || 0;
     const late = monitoringStats?.late || adminData.stats?.yellowClasses || 0;
@@ -1396,7 +1397,11 @@ const DashboardPage = () => {
       absent,
       substituteActive,
       upcoming,
-      totalScheduled
+      totalScheduled,
+      totalClasses: adminData.stats?.totalClasses || 0,
+      totalSections: adminData.stats?.totalSections || 0,
+      totalSubjects: adminData.stats?.totalSubjects || 0,
+      totalStudents: adminData.stats?.totalStudents || 0
     };
   }, [adminData, monitoringStats]);
 
@@ -1664,10 +1669,10 @@ const DashboardPage = () => {
           </div>
         )}        {['admin', 'principal', 'hod'].includes(user?.role?.toLowerCase()) && adminData && (() => {
           // Display stats directly from the API response
-          const { totalTeachers, currentlyTeaching, availableTeachers, absentTeachers, onTime, late, absent, substituteActive, upcoming, totalScheduled } = schoolStats;
+          const { totalTeachers, currentlyTeaching, availableTeachers, absentTeachers, onTime, late, absent, substituteActive, upcoming, totalScheduled, totalClasses, totalSections, totalSubjects, totalStudents } = schoolStats;
 
           const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-          const periods = [1, 2, 3, 4, 5, 6, 7];
+          const periods = periodsList.map(pl => pl.period);
           const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
           const todayDayName = daysOfWeek[new Date().getDay()]; // always use today's weekday for live indicator colors
 
@@ -1680,9 +1685,36 @@ const DashboardPage = () => {
                   <h2 className="text-xl font-black text-stone-900 tracking-tight uppercase">
                     🏫 Teacher Monitoring Dashboard
                   </h2>
-                  <p className="text-stone-550 text-xs mt-1">
+                  <p className="text-stone-555 text-xs mt-1">
                     Unified administration control center for schedules, real-time class operations, and attendance audits.
                   </p>
+                </div>
+              </div>
+
+              {/* School Structure Overview */}
+              <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-6">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-amber-600 mb-4">🏫 School Structure Overview</h3>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="bg-stone-50 border border-stone-200/60 rounded-xl p-4 flex flex-col justify-between transition-all hover:shadow-md hover:border-amber-300">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">Total Classes</span>
+                    <span className="text-2xl font-extrabold text-stone-950 mt-2">{totalClasses}</span>
+                  </div>
+                  <div className="bg-stone-50 border border-stone-200/60 rounded-xl p-4 flex flex-col justify-between transition-all hover:shadow-md hover:border-amber-300">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">Total Sections</span>
+                    <span className="text-2xl font-extrabold text-stone-950 mt-2">{totalSections}</span>
+                  </div>
+                  <div className="bg-stone-50 border border-stone-200/60 rounded-xl p-4 flex flex-col justify-between transition-all hover:shadow-md hover:border-amber-300">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">Total Subjects</span>
+                    <span className="text-2xl font-extrabold text-stone-950 mt-2">{totalSubjects}</span>
+                  </div>
+                  <div className="bg-stone-50 border border-stone-200/60 rounded-xl p-4 flex flex-col justify-between transition-all hover:shadow-md hover:border-amber-300">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">Total Students</span>
+                    <span className="text-2xl font-extrabold text-stone-950 mt-2">{totalStudents}</span>
+                  </div>
+                  <div className="bg-stone-50 border border-stone-200/60 rounded-xl p-4 flex flex-col justify-between transition-all hover:shadow-md hover:border-amber-300">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">Total Teachers</span>
+                    <span className="text-2xl font-extrabold text-stone-955 mt-2">{totalTeachers}</span>
+                  </div>
                 </div>
               </div>
 
@@ -3384,7 +3416,7 @@ const DashboardPage = () => {
                       onChange={(e) => handlePeriodChange(Number(e.target.value))}
                       className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-amber-500 text-stone-900 font-medium"
                     >
-                      {(periodsList.length > 0 ? periodsList.map(pl => pl.period) : [1, 2, 3, 4, 5, 6, 7, 8]).map(p => {
+                      {periodsList.map(pl => pl.period).map(p => {
                         const pInfo = periodsList.find(pl => pl.period === p);
                         return (
                           <option key={p} value={p}>

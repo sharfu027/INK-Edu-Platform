@@ -504,6 +504,16 @@ export const getAdminDashboard = async (req, res) => {
     const availableTeachers = allTeachers.filter(t => punchedInTeacherIds.has(t._id.toString()) && !activeTeacherIds.has(t._id.toString())).length;
     const absentTeachers = allTeachers.filter(t => !activeTeacherIds.has(t._id.toString()) && !punchedInTeacherIds.has(t._id.toString())).length;
 
+    const totalClassesCount = await Class.countDocuments({ isActive: { $ne: false } });
+    const sectionsResult = await Class.distinct('section', { isActive: { $ne: false } });
+    const totalSectionsCount = sectionsResult.length;
+    const totalSubjectsCount = await Subject.countDocuments({ isActive: { $ne: false } });
+    const strengthAggregate = await Class.aggregate([
+      { $match: { isActive: { $ne: false } } },
+      { $group: { _id: null, totalStrength: { $sum: '$strength' } } }
+    ]);
+    const totalStudentsCount = strengthAggregate.length > 0 ? strengthAggregate[0].totalStrength : 0;
+
     const stats = {
       totalTeachers,
       currentlyTeaching,
@@ -514,7 +524,11 @@ export const getAdminDashboard = async (req, res) => {
       redClasses,
       purpleClasses,
       blueClasses,
-      totalScheduled: todayEntries.length
+      totalScheduled: todayEntries.length,
+      totalClasses: totalClassesCount,
+      totalSections: totalSectionsCount,
+      totalSubjects: totalSubjectsCount,
+      totalStudents: totalStudentsCount
     };
 
     return res.status(200).json({
@@ -917,6 +931,16 @@ export const getMonitoringStats = async (req, res) => {
       else if (status === 'blue') upcoming++;
     }
 
+    const totalClassesCount = await Class.countDocuments({ isActive: { $ne: false } });
+    const sectionsResult = await Class.distinct('section', { isActive: { $ne: false } });
+    const totalSectionsCount = sectionsResult.length;
+    const totalSubjectsCount = await Subject.countDocuments({ isActive: { $ne: false } });
+    const strengthAggregate = await Class.aggregate([
+      { $match: { isActive: { $ne: false } } },
+      { $group: { _id: null, totalStrength: { $sum: '$strength' } } }
+    ]);
+    const totalStudentsCount = strengthAggregate.length > 0 ? strengthAggregate[0].totalStrength : 0;
+
     return res.status(200).json({
       status: true,
       data: {
@@ -925,7 +949,11 @@ export const getMonitoringStats = async (req, res) => {
         late,
         absent,
         substituteActive,
-        upcoming
+        upcoming,
+        totalClasses: totalClassesCount,
+        totalSections: totalSectionsCount,
+        totalSubjects: totalSubjectsCount,
+        totalStudents: totalStudentsCount
       }
     });
   } catch (error) {

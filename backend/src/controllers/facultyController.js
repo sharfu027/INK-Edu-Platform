@@ -304,3 +304,158 @@ export const downloadDocument = async (req, res) => {
 
   return res.download(filePath);
 };
+
+/**
+ * Bulk Import Teachers
+ */
+export const importTeachers = async (req, res) => {
+  const teachersList = req.body;
+  if (!Array.isArray(teachersList)) {
+    return res.status(400).json({ status: false, message: 'Expected an array of teacher objects' });
+  }
+
+  let createdCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+  const errors = [];
+
+  try {
+    const settings = await SchoolSettings.findOne();
+    const defaultSkipFace = settings ? !settings.face_auth_enabled : false;
+    const defaultSkipLocation = settings ? !settings.location_auth_enabled : false;
+
+    for (let index = 0; index < teachersList.length; index++) {
+      const row = teachersList[index];
+      const rawEmployeeId = row.employeeId;
+      const rawName = row.name;
+      const rawEmail = row.email;
+      const rawPhone = row.phone || '';
+      const rawQual = row.qualification || 'N/A';
+      const rawExp = row.experience;
+      const rawPassword = row.password || 'Welcome@123';
+      const rawRole = row.role || 'teacher';
+
+      if (!rawName || !rawEmail || !rawEmployeeId) {
+        errors.push(`Row ${index + 1}: Missing name, email, or employeeId`);
+        continue;
+      }
+
+      const name = rawName.trim();
+      const email = rawEmail.trim().toLowerCase();
+      const employeeId = rawEmployeeId.trim();
+      const phone = rawPhone.trim();
+      const qualification = rawQual.trim();
+      const experience = parseInt(rawExp) || 0;
+
+      // Check duplicate employeeId in Teacher
+      let existingTeacher = await Teacher.findOne({ employeeId: { $regex: new RegExp(`^${employeeId}$`, 'i') } });
+      
+      // Check duplicate email in User
+      let existingUser = await User.findOne({ email });
+
+      if (existingTeacher) {
+        // Update existing teacher profile
+        existingTeacher.name = name;
+        existingTeacher.email = email;
+        existingTeacher.phone = phone;
+        existingTeacher.qualification = qualification;
+        existingTeacher.experience = experience;
+        
+        if (existingUser) {
+          existingUser.name = name;
+          existingUser.phone = phone;
+          await existingUser.save();
+        } else {
+          // Create login if missing
+          const newUser = await User.create({
+            name,
+            email,
+            phone,
+            password_hash: rawPassword,
+            role: rawRole,
+            face_embeddings: [],
+            skip_face: defaultSkipFace,
+            skip_location: defaultSkipLocation
+          });
+          existingTeacher.user = newUser._id;
+        }
+        
+        await existingTeacher.save();
+        updatedCount++;
+      } else {
+        // Create new User login first
+        let userId = null;
+        if (existingUser) {
+          userId = existingUser._id;
+          if (existingUser.role !== rawRole) {
+            existingUser.role = rawRole;
+            await existingUser.save();
+          }
+        } else {
+          const newUser = await User.create({
+            name,
+            email,
+            phone,
+            password_hash: rawPassword,
+            role: rawRole,
+            face_embeddings: [],
+            skip_face: defaultSkipFace,
+            skip_location: defaultSkipLocation
+          });
+          userId = newUser._id;
+        }
+
+        // Create new Teacher
+        await Teacher.create({
+          user: userId,
+          employeeId,
+          name,
+          email,
+          phone,
+          qualification,
+          experience,
+          status: 'Active'
+        });
+        createdCount++;
+      }
+    }
+
+    return res.status(200).json({
+      status: true,
+      message: 'Teachers import completed',
+      data: { createdCount, updatedCount, skippedCount, errors }
+    });
+  } catch (error) {
+    return res.status(500).json({ status: false, message: error.message });
+  }
+};
+
+/**
+ * Bulk Export Teachers
+ */
+export const exportTeachers = async (req, res) => {
+  try {
+    const teachers = await Teacher.find();
+    let csv = 'employeeId,name,email,phone,qualification,experience,status\n';
+    
+    teachers.forEach(t => {
+      const empId = `"${t.employeeId.replace(/"/g, '""')}"`;
+      const name = `"${t.name.replace(/"/g, '""')}"`;
+      const email = `"${t.email.replace(/"/g, '""')}"`;
+      const phone = t.phone ? `"${t.phone.replace(/"/g, '""')}"` : '""';
+      const qual = t.qualification ? `"${t.qualification.replace(/"/g, '""')}"` : '""';
+      const exp = t.experience || 0;
+      const status = `"${(t.status || 'Active').replace(/"/g, '""')}"`;
+      
+      csv += `${empId},${name},${email},${phone},${qual},${exp},${status}\n`;
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=teachers_export.csv');
+    return res.status(200).send(csv);
+  } catch (error) {
+    return res.status(500).json({ status: false, message: error.message });
+  }
+};
+
+

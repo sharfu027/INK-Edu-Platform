@@ -52,6 +52,72 @@ const seedAdminUser = async () => {
   }
 };
 
+const runDatabaseMigration = async () => {
+  try {
+    const Class = (await import('../models/Class.js')).default;
+    const Subject = (await import('../models/Subject.js')).default;
+    const AcademicYear = (await import('../models/AcademicYear.js')).default;
+    const SchoolSettings = (await import('../models/SchoolSettings.js')).default;
+
+    // 1. Migrate Classes
+    const classes = await Class.find();
+    for (const cls of classes) {
+      let updated = false;
+      if (cls.isActive === undefined) {
+        cls.isActive = true;
+        updated = true;
+      }
+      if (!cls.className && cls.standard) {
+        cls.className = cls.standard;
+        updated = true;
+      }
+      if (updated) {
+        await cls.save();
+      }
+    }
+
+    // 2. Migrate Subjects
+    const subjects = await Subject.find();
+    let codeCounter = 1;
+    for (const subj of subjects) {
+      let updated = false;
+      if (subj.isActive === undefined) {
+        subj.isActive = true;
+        updated = true;
+      }
+      if (!subj.subjectName && subj.name) {
+        subj.subjectName = subj.name;
+        updated = true;
+      }
+      if (!subj.subjectCode) {
+        const cleanName = (subj.name || 'SUBJ').toUpperCase().replace(/[^A-Z]/g, '');
+        const prefix = cleanName.substring(0, 4).padEnd(4, 'X');
+        subj.subjectCode = `${prefix}${String(codeCounter++).padStart(3, '0')}`;
+        updated = true;
+      }
+      if (updated) {
+        await subj.save();
+      }
+    }
+
+    // 3. Initialize default Academic Year
+    const yearCount = await AcademicYear.countDocuments();
+    if (yearCount === 0) {
+      const activeYear = await AcademicYear.create({
+        name: '2026-2027',
+        status: 'active',
+        isActive: true
+      });
+      console.log(`Default Academic Year ${activeYear.name} created and activated.`);
+      await SchoolSettings.findOneAndUpdate({}, { academicYear: '2026-2027' }, { upsert: true });
+    }
+
+    console.log('Database migration (classes, subjects, academic years) completed.');
+  } catch (error) {
+    console.error('Database migration error:', error.message);
+  }
+};
+
 const connectDB = async () => {
   try {
     const conn = await mongoose.connect(process.env.MONGODB_URL || 'mongodb://localhost:27017/face_auth_db', {
@@ -60,6 +126,7 @@ const connectDB = async () => {
     console.log(`MongoDB Connected: ${conn.connection.host}`);
     await seedDefaultRoles();
     await seedAdminUser();
+    await runDatabaseMigration();
   } catch (error) {
     console.error(`Database Connection Error: ${error.message}`);
     console.warn('[Warning] Database connection failed. The server will continue to run, but database features will be unavailable.');

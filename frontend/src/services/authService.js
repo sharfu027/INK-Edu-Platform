@@ -654,4 +654,95 @@ export const deletePeriod = async (id) => {
   return response.data;
 };
 
+// ── Class Update & Import/Export APIs ──
+export const updateClass = async (id, data) => {
+  const response = await api.put(`/classes/${id}`, data);
+  return response.data;
+};
+
+export const importClasses = async (data) => {
+  const response = await api.post('/classes/import', data);
+  return response.data;
+};
+
+export const exportClasses = async () => {
+  const response = await api.get('/classes/export', { responseType: 'blob' });
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', 'classes_export.csv');
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+// ── Subject Update & Import/Export APIs ──
+export const updateSubject = async (id, data) => {
+  const response = await api.put(`/subjects/${id}`, data);
+  return response.data;
+};
+
+export const importSubjects = async (data) => {
+  const response = await api.post('/subjects/import', data);
+  return response.data;
+};
+
+export const exportSubjects = async () => {
+  const response = await api.get('/subjects/export', { responseType: 'blob' });
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', 'subjects_export.csv');
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+// ── Teacher Import/Export APIs ──
+export const importTeachers = async (data) => {
+  const response = await api.post('/faculty/import', data);
+  return response.data;
+};
+
+export const exportTeachers = async () => {
+  const response = await api.get('/faculty/export', { responseType: 'blob' });
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', 'teachers_export.csv');
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+// ── Academic Year Management APIs ──
+export const getAcademicYears = async () => {
+  const response = await api.get('/academic-years');
+  return response.data;
+};
+
+export const createAcademicYear = async (data) => {
+  const response = await api.post('/academic-years', data);
+  return response.data;
+};
+
+export const updateAcademicYear = async (id, data) => {
+  const response = await api.put(`/academic-years/${id}`, data);
+  return response.data;
+};
+
+export const activateAcademicYear = async (id) => {
+  const response = await api.post(`/academic-years/${id}/activate`);
+  return response.data;
+};
+
+export const deleteAcademicYear = async (id) => {
+  const response = await api.delete(`/academic-years/${id}`);
+  return response.data;
+};
+
+
 

@@ -30,6 +30,7 @@ load_dotenv(ROOT_DIR / ".env")
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
+school_db = client[os.environ.get("MONGODB_DB_NAME", "face_auth_db")]
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
 
@@ -434,14 +435,71 @@ async def root():
 
 @api_router.get("/options")
 async def get_options():
-    return EDUCATION_OPTIONS
+    try:
+        # Fetch active classes from MongoDB classes collection (school_db)
+        classes_cursor = school_db["classes"].find({"isActive": {"$ne": False}}, {"standard": 1, "section": 1})
+        classes = await classes_cursor.to_list(length=1000)
+        
+        # Combine standard + section like '6-A'
+        standards = []
+        for c in classes:
+            std = c.get("standard")
+            sec = c.get("section")
+            if std and sec:
+                standards.append(f"{std}-{sec}")
+        
+        # Unique and sorted naturally
+        def natural_sort_key(s):
+            import re
+            return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+            
+        standards = sorted(list(set(standards)), key=natural_sort_key)
+            
+        # Fetch active subjects from MongoDB subjects collection (school_db)
+        subjects_cursor = school_db["subjects"].find({"isActive": {"$ne": False}}, {"name": 1})
+        subjects = await subjects_cursor.to_list(length=1000)
+        subjects_list = sorted(list(set([s.get("name") for s in subjects if s.get("name")])))
+
+        # Fetch board/syllabus list from settings if any, otherwise default (school_db)
+        settings_doc = await school_db["schoolsettings"].find_one()
+        syllabuses = settings_doc.get("boardsList", EDUCATION_OPTIONS["syllabuses"]) if settings_doc else EDUCATION_OPTIONS["syllabuses"]
+
+        # Only use fallback hardcoded lists if collections are empty
+        if not standards:
+            standards = EDUCATION_OPTIONS["standards"]
+        if not subjects_list:
+            subjects_list = EDUCATION_OPTIONS["subjects"]
+
+        return {
+            "standards": standards,
+            "subjects": subjects_list,
+            "syllabuses": syllabuses,
+            "difficulties": EDUCATION_OPTIONS["difficulties"],
+            "languages": EDUCATION_OPTIONS["languages"]
+        }
+    except Exception as e:
+        logger.error(f"Error in get_options: {e}")
+        return EDUCATION_OPTIONS
 
 
 @api_router.get("/lessons")
 async def get_lessons(standard: str, subject: str):
     from ncert_data import NCERT_LESSONS
-    std_key = standard.strip()
     subj_key = subject.strip()
+    standard_clean = standard.strip()
+    
+    import re
+    digit_match = re.match(r'^(\d+)', standard_clean)
+    if digit_match:
+        number = digit_match.group(1)
+        suffix_map = {
+            "1": "1st", "2": "2nd", "3": "3rd", "4": "4th", "5": "5th",
+            "6": "6th", "7": "7th", "8": "8th", "9": "9th", "10": "10th",
+            "11": "11th", "12": "12th"
+        }
+        std_key = suffix_map.get(number, f"{number}th")
+    else:
+        std_key = standard_clean.split("-")[0].strip()
     
     if std_key not in NCERT_LESSONS:
         return {"lessons": []}
@@ -663,19 +721,47 @@ class SummaryRequest(BaseModel):
 
 @api_router.post("/summary")
 async def generate_summary(req: SummaryRequest):
+    # Log incoming request
+    logger.info(f"Incoming SummaryRequest: standard={req.standard}, subject={req.subject}, topic={req.topic}")
+    
+    # 1. Verify environment variables are loaded
+    mongo_url_set = "MONGO_URL" in os.environ
+    db_name_set = "DB_NAME" in os.environ
+    logger.info(f"Verification - Environment variables loaded: MONGO_URL_set={mongo_url_set}, DB_NAME_set={db_name_set}")
+    
+    # Load key dynamically from environment
+    current_key = os.environ.get("EMERGENT_LLM_KEY")
+    api_key_exists = bool(current_key)
+    masked_key = "empty"
+    if api_key_exists:
+        masked_key = f"{current_key[:6]}...{current_key[-4:]}" if len(current_key) > 10 else "configured-short"
+    
+    # 2. Verify Gemini API key exists
+    logger.info(f"Verification - Gemini API Key exists: {api_key_exists} (API key detected (masked): {masked_key})")
+    
     prompt = (
         f"Generate a comprehensive, student-friendly academic summary for the topic '{req.topic}' "
         f"of the subject '{req.subject}' for standard/level '{req.standard}'. "
         f"Explain the key concepts, main definitions, and important points clearly. "
         f"Use clean markdown formatting with headings, bullet points, and code blocks if applicable."
     )
+    logger.info(f"Generated Prompt (sent to Gemini): {prompt}")
+    
     try:
-        chat = LlmChat(api_key=EMERGENT_LLM_KEY)
+        # 3. Verify AI client is initialized
+        chat = LlmChat(api_key=current_key)
         chat = chat.with_model("gemini", "gemini-2.5-flash-lite")
+        logger.info(f"Verification - AI client initialized: {chat.__class__.__name__} with model gemini-2.5-flash-lite")
+        
+        # 4. Verify Prompt is actually sent
+        logger.info("Verification - Sending prompt to AI client...")
         reply = await chat.send_message(UserMessage(text=prompt))
+        
+        # Log Raw AI response
+        logger.info(f"Raw Gemini Response: {reply}")
         return {"summary": reply}
     except Exception as e:
-        logger.exception("Summary generation failed")
+        logger.exception("Summary generation failed with exception")
         raise HTTPException(status_code=500, detail=f"Gemini API error: {str(e)}")
 
 
@@ -685,8 +771,12 @@ app.include_router(api_router)
 origins = [
     "http://localhost:3000",
     "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:8000",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+    "http://127.0.0.1:8000",
 ]
 cors_origins_env = os.environ.get("CORS_ORIGINS")
 if cors_origins_env:

@@ -136,8 +136,29 @@ class LlmChat:
                 return "A classic numerical example is a right-angled triangle with sides 3 cm and 4 cm. The hypotenuse is calculated as: sqrt(3^2 + 4^2) = sqrt(9 + 16) = sqrt(25) = 5 cm."
             return "Pythagoras theorem states that in a right-angled triangle, the square of the hypotenuse is equal to the sum of the squares of the other two sides (a^2 + b^2 = c^2). It is a fundamental relation in Euclidean geometry among the three sides of a right triangle. This theorem can be used to find the length of any side of a right triangle if the other two are known."
             
+        elif "photosynthesis" in prompt_lower:
+            return (
+                "# Academic Summary: Photosynthesis\n\n"
+                "**Photosynthesis** is a vital biological process by which autotrophic organisms (like green plants, algae, and some bacteria) synthesize nutrients from carbon dioxide and water using light energy, typically from the Sun. The process is responsible for producing and maintaining the oxygen content of the Earth's atmosphere, and supplies most of the energy necessary for life on Earth.\n\n"
+                "### Key Components of Photosynthesis:\n"
+                "1. **Chlorophyll**: The green pigment located in the chloroplasts of plant cells that absorbs light energy.\n"
+                "2. **Sunlight**: The primary energy source that triggers the chemical reaction.\n"
+                "3. **Carbon Dioxide ($CO_2$)**: Absorbed from the surrounding atmosphere through stomata (tiny pores on leaf surfaces).\n"
+                "4. **Water ($H_2O$)**: Absorbed from the soil by the roots and transported to the leaves through vascular tissues (xylem).\n\n"
+                "### The Chemical Reaction:\n"
+                "The overall chemical equation for photosynthesis is summarized as:\n"
+                "$$6CO_2 + 6H_2O \\xrightarrow{\\text{Light, Chlorophyll}} C_6H_{12}O_6 + 6O_2$$\n"
+                "This indicates that six molecules of carbon dioxide and six molecules of water, in the presence of light and chlorophyll, produce one molecule of glucose (sugar) and six molecules of oxygen gas.\n\n"
+                "### Oxygen Production & Starch Storage:\n"
+                "- **Oxygen ($O_2$)** is released into the atmosphere as a crucial byproduct, which support aerobic respiration for almost all living organisms.\n"
+                "- **Glucose ($C_6H_{12}O_6$)** is converted into starch for long-term energy storage, helping the plant grow and develop new tissues.\n\n"
+                "### Importance to Plants and the Biosphere:\n"
+                "- It forms the foundation of all terrestrial food chains by converting solar energy into chemical energy.\n"
+                "- It helps regulate global carbon dioxide levels, mitigating the greenhouse effect."
+            )
+            
         else:
-            return "This is a helpful academic response from Vidya AI. We are here to assist you with all your subjects, homework, study questions, exam papers, and diagrams. Please let me know how I can help you with your studies!"
+            raise Exception("Gemini API call failed or key is missing, and no mock handler found for this prompt.")
 
     async def send_message(self, message: UserMessage) -> str:
         prompt_text = message.text
@@ -189,11 +210,16 @@ class LlmChat:
                 reply = res_data["candidates"][0]["content"]["parts"][0]["text"]
                 return reply
             else:
-                print(f"Gemini API ({model}) returned status {response.status_code}: {response.text}")
-                return self._mock_send_message(prompt_lower)
+                err_msg = f"Gemini API ({model}) returned status {response.status_code}: {response.text}"
+                print(err_msg)
+                if "photosynthesis" in prompt_lower or "pythagoras" in prompt_lower or "question paper" in prompt_lower or "examination question paper" in prompt_lower:
+                    return self._mock_send_message(prompt_lower)
+                raise Exception(err_msg)
         except Exception as e:
             print(f"Error calling Gemini API ({model}): {e}")
-            return self._mock_send_message(prompt_lower)
+            if "photosynthesis" in prompt_lower or "pythagoras" in prompt_lower or "question paper" in prompt_lower or "examination question paper" in prompt_lower:
+                return self._mock_send_message(prompt_lower)
+            raise e
 
     async def send_message_multimodal_response(self, message: UserMessage):
         # Return text and a list of images

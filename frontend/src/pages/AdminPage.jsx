@@ -2,7 +2,19 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { loginWithPassword, getProfile, getCompanySettings, updateCompanySettings, getConsolidatedReport, getDetailsReport, getAdminEmployees, updateEmployeeSettings, deleteEmployee, exportAttendanceExcel, resetEmployeePassword, getDailyStatus, uploadEmployeeDocument, downloadEmployeeDocument, getRoles, createRole, updateRole, deleteRole, getClasses, createClass, deleteClass, getSubjects, createSubject, deleteSubject, getMappings, createMapping, deleteMapping, addTeacher, getTimetables, createTimetableEntry, updateTimetableEntry, deleteTimetableEntry, getPeriods, createPeriod, updatePeriod, deletePeriod } from '../services/authService';
+import {
+  loginWithPassword, getProfile, getCompanySettings, updateCompanySettings,
+  getConsolidatedReport, getDetailsReport, getAdminEmployees, updateEmployeeSettings,
+  deleteEmployee, exportAttendanceExcel, resetEmployeePassword, getDailyStatus,
+  uploadEmployeeDocument, downloadEmployeeDocument, getRoles, createRole,
+  updateRole, deleteRole, getClasses, createClass, updateClass, deleteClass,
+  getSubjects, createSubject, updateSubject, deleteSubject, getMappings,
+  createMapping, deleteMapping, addTeacher, getTimetables, createTimetableEntry,
+  updateTimetableEntry, deleteTimetableEntry, getPeriods, createPeriod,
+  updatePeriod, deletePeriod, getAcademicYears, createAcademicYear,
+  updateAcademicYear, activateAcademicYear, deleteAcademicYear, importClasses,
+  exportClasses, importSubjects, exportSubjects, importTeachers, exportTeachers
+} from '../services/authService';
 import { useTranslation } from 'react-i18next';
 import Spinner from '../components/ui/Spinner';
 import useGeolocation from '../hooks/useGeolocation';
@@ -148,6 +160,25 @@ const AdminPage = () => {
     endTime: '',
     isBreak: false
   });
+
+  // Academic Years
+  const [academicYears, setAcademicYears] = useState([]);
+  const [academicYearsLoading, setAcademicYearsLoading] = useState(false);
+  const [newAcademicYearName, setNewAcademicYearName] = useState('');
+
+  // Class & Subject Edit Modals
+  const [editingClass, setEditingClass] = useState(null);
+  const [isClassEditModalOpen, setIsClassEditModalOpen] = useState(false);
+  const [editingSubject, setEditingSubject] = useState(null);
+  const [isSubjectEditModalOpen, setIsSubjectEditModalOpen] = useState(false);
+
+  // Bulk CSV Import Modal
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importType, setImportType] = useState('classes'); // 'classes' | 'subjects' | 'teachers'
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvPreview, setCsvPreview] = useState([]);
+  const [importSummary, setImportSummary] = useState(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   // Roles Management
   const [roles, setRoles] = useState([]);
@@ -382,6 +413,20 @@ const AdminPage = () => {
     }
   }, []);
 
+  const fetchAcademicYears = useCallback(async () => {
+    try {
+      setAcademicYearsLoading(true);
+      const res = await getAcademicYears();
+      if (res?.status && Array.isArray(res.data)) {
+        setAcademicYears(res.data);
+      }
+    } catch (err) {
+      console.error("Failed to load academic years:", err);
+    } finally {
+      setAcademicYearsLoading(false);
+    }
+  }, []);
+
   const fetchEmployees = useCallback(async () => {
     try {
       setEmpLoading(true);
@@ -510,6 +555,7 @@ const AdminPage = () => {
       fetchSettings();
       fetchEmployees();
       fetchPeriods();
+      fetchAcademicYears();
     }
     if (activeTab === 'consolidated') fetchConsolidated(); 
     if (activeTab === 'details' || activeTab === 'individual_details') fetchDetails(); 
@@ -538,7 +584,7 @@ const AdminPage = () => {
       fetchSubjects();
       fetchPeriods();
     }
-  }, [activeTab, reportMonth, reportYear, deptFilter, dailyStatusDate, fetchDailyStatus, fetchRoles, fetchSettings, fetchEmployees, fetchClasses, fetchSubjects, fetchMappings, fetchTimetableEntries, fetchPeriods]);
+  }, [activeTab, reportMonth, reportYear, deptFilter, dailyStatusDate, fetchDailyStatus, fetchRoles, fetchSettings, fetchEmployees, fetchClasses, fetchSubjects, fetchMappings, fetchTimetableEntries, fetchPeriods, fetchAcademicYears]);
 
   // Real-time polling every 15 seconds
   useEffect(() => {
@@ -724,7 +770,7 @@ const AdminPage = () => {
       periodConfigMap[p.periodNumber] = p;
     }
   });
-  const activePeriodNumbers = periods.filter(p => !p.isBreak && p.periodNumber).map(p => p.periodNumber).sort((a, b) => a - b);
+  const activePeriodNumbers = sortedPeriods.filter(p => !p.isBreak && p.periodNumber).map(p => p.periodNumber);
 
   const escapeCSV = (val) => {
     if (val === undefined || val === null) return '';
@@ -1085,6 +1131,283 @@ const AdminPage = () => {
       toast.error(err?.response?.data?.message || err?.response?.data?.detail || "Failed to update teacher");
     } finally {
       setIsSavingFaculty(false);
+    }
+  };
+
+  // ─── Academic Year Handlers ───
+  const handleCreateAcademicYear = async (e) => {
+    e.preventDefault();
+    if (!newAcademicYearName.trim()) return toast.error("Academic Year name is required");
+    try {
+      const res = await createAcademicYear({ name: newAcademicYearName.trim() });
+      if (res?.status) {
+        toast.success(`Academic Year ${newAcademicYearName.trim()} created!`);
+        setNewAcademicYearName('');
+        fetchAcademicYears();
+      } else {
+        toast.error(res?.message || "Failed to create academic year");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.response?.data?.detail || "Failed to create academic year");
+    }
+  };
+
+  const handleActivateAcademicYear = async (id) => {
+    try {
+      const res = await activateAcademicYear(id);
+      if (res?.status) {
+        toast.success("Academic Year activated successfully!");
+        fetchAcademicYears();
+      } else {
+        toast.error(res?.message || "Failed to activate academic year");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to activate academic year");
+    }
+  };
+
+  const handleDeleteAcademicYear = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this academic year?")) return;
+    try {
+      const res = await deleteAcademicYear(id);
+      if (res?.status) {
+        toast.success("Academic Year deleted successfully");
+        fetchAcademicYears();
+      } else {
+        toast.error(res?.message || "Failed to delete academic year");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Failed to delete academic year");
+    }
+  };
+
+  // ─── Class Edit & Toggle Active Handlers ───
+  const handleClassEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingClass) return;
+    try {
+      const res = await updateClass(editingClass._id, {
+        standard: editingClass.standard,
+        section: editingClass.section.trim().toUpperCase(),
+        board: editingClass.board,
+        classTeacher: editingClass.classTeacher || undefined,
+        strength: parseInt(editingClass.strength) || 0,
+        isActive: editingClass.isActive
+      });
+      if (res?.status) {
+        toast.success("Class updated successfully!");
+        setIsClassEditModalOpen(false);
+        setEditingClass(null);
+        fetchClasses();
+      } else {
+        toast.error(res?.message || "Failed to update class");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to update class");
+    }
+  };
+
+  const handleToggleClassActive = async (cls, newActiveState) => {
+    try {
+      const res = await updateClass(cls._id, {
+        standard: cls.standard,
+        section: cls.section,
+        board: cls.board,
+        classTeacher: cls.classTeacher?._id || cls.classTeacher || undefined,
+        strength: cls.strength || 0,
+        isActive: newActiveState
+      });
+      if (res?.status) {
+        toast.success(`Class ${newActiveState ? 'enabled' : 'disabled'} successfully!`);
+        fetchClasses();
+      } else {
+        toast.error(res?.message || "Failed to toggle class status");
+      }
+    } catch (err) {
+      toast.error("Failed to toggle class status");
+    }
+  };
+
+  // ─── Subject Edit & Toggle Active Handlers ───
+  const handleSubjectEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingSubject) return;
+    try {
+      const res = await updateSubject(editingSubject._id, {
+        name: editingSubject.name.trim(),
+        subjectName: editingSubject.name.trim(),
+        subjectCode: editingSubject.code?.trim(),
+        description: editingSubject.description?.trim(),
+        isActive: editingSubject.isActive
+      });
+      if (res?.status) {
+        toast.success("Subject updated successfully!");
+        setIsSubjectEditModalOpen(false);
+        setEditingSubject(null);
+        fetchSubjects();
+      } else {
+        toast.error(res?.message || "Failed to update subject");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to update subject");
+    }
+  };
+
+  const handleToggleSubjectActive = async (sub, newActiveState) => {
+    try {
+      const res = await updateSubject(sub._id, {
+        name: sub.name,
+        isActive: newActiveState
+      });
+      if (res?.status) {
+        toast.success(`Subject ${newActiveState ? 'enabled' : 'disabled'} successfully!`);
+        fetchSubjects();
+      } else {
+        toast.error(res?.message || "Failed to toggle subject status");
+      }
+    } catch (err) {
+      toast.error("Failed to toggle subject status");
+    }
+  };
+
+  // ─── CSV Import & Preview Handlers ───
+  const handleCSVUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvFile(file);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target.result;
+      const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+      if (lines.length === 0) {
+        toast.error("Empty CSV file");
+        return;
+      }
+      // Simple CSV parser
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
+      const parsedData = lines.slice(1).map(line => {
+        // Handle comma separation with potential quotes
+        let matches = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
+        if (!matches) {
+          matches = line.split(',');
+        }
+        const row = {};
+        headers.forEach((h, idx) => {
+          row[h] = (matches[idx] || '').trim().replace(/^["']|["']$/g, '');
+        });
+        return row;
+      });
+      setCsvPreview(parsedData);
+    };
+    reader.readAsText(file);
+  };
+
+  const submitCSVImport = async () => {
+    if (csvPreview.length === 0) return toast.error("No data parsed to import");
+    setIsImporting(true);
+    try {
+      let res;
+      if (importType === 'classes') {
+        const payload = csvPreview.map(row => ({
+          standard: row.Standard || row.standard,
+          section: (row.Section || row.section || 'A').toUpperCase(),
+          board: row.Board || row.board || 'CBSE',
+          classTeacherEmail: row.ClassTeacherEmail || row.teacherEmail || undefined,
+          strength: parseInt(row.Strength || row.strength) || 0
+        }));
+        res = await importClasses(payload);
+      } else if (importType === 'subjects') {
+        const payload = csvPreview.map(row => ({
+          name: row.Name || row.name,
+          subjectName: row.Name || row.name,
+          subjectCode: row.Code || row.code,
+          description: row.Description || row.description
+        }));
+        res = await importSubjects(payload);
+      } else if (importType === 'teachers') {
+        const payload = csvPreview.map(row => ({
+          employeeId: row.EmployeeID || row.employeeId,
+          name: row.Name || row.name,
+          email: row.Email || row.email,
+          phone: row.Phone || row.phone || '',
+          qualification: row.Qualification || row.qualification || '',
+          experience: parseInt(row.Experience || row.experience) || 0,
+          role: row.Role || row.role || 'teacher',
+          password: row.Password || row.password || 'Welcome@123'
+        }));
+        res = await importTeachers(payload);
+      }
+
+      if (res?.status) {
+        toast.success("Bulk import completed successfully!");
+        setImportSummary(res.summary || res);
+        setCsvFile(null);
+        setCsvPreview([]);
+        
+        // Refresh appropriate lists
+        if (importType === 'classes') fetchClasses();
+        if (importType === 'subjects') fetchSubjects();
+        if (importType === 'teachers') fetchEmployees();
+      } else {
+        toast.error(res?.message || "Failed to complete import");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.response?.data?.detail || "Import failed due to server error");
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // ─── CSV Export Action Handlers ───
+  const handleExportClasses = async () => {
+    try {
+      const csvData = await exportClasses();
+      const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `classes_export_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success("Classes exported successfully!");
+    } catch (err) {
+      toast.error("Failed to export classes");
+    }
+  };
+
+  const handleExportSubjects = async () => {
+    try {
+      const csvData = await exportSubjects();
+      const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `subjects_export_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success("Subjects exported successfully!");
+    } catch (err) {
+      toast.error("Failed to export subjects");
+    }
+  };
+
+  const handleExportTeachers = async () => {
+    try {
+      const csvData = await exportTeachers();
+      const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `teachers_export_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast.success("Teachers exported successfully!");
+    } catch (err) {
+      toast.error("Failed to export teachers");
     }
   };
 
@@ -1727,6 +2050,106 @@ const AdminPage = () => {
             </div>
           </div>
 
+          {/* Academic Year Management Card */}
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden mb-8 text-gray-900 animate-fadeIn">
+            <div className="bg-gray-50 border-b border-gray-200 p-6">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+                📅 Academic Year Management
+              </h2>
+              <p className="text-gray-500 text-sm mt-1">
+                Configure academic terms, create new school years, and toggle the active term for schedules.
+              </p>
+            </div>
+
+            <div className="p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Creation Form */}
+              <div className="bg-stone-50 p-6 rounded-2xl border border-stone-200 h-fit space-y-5">
+                <h3 className="text-base font-bold text-stone-850">➕ Create Academic Year</h3>
+                <form onSubmit={handleCreateAcademicYear} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Year Code / Name *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 2026-2027"
+                      value={newAcademicYearName}
+                      onChange={(e) => setNewAcademicYearName(e.target.value)}
+                      className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-400 outline-none font-semibold"
+                      required
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">Use standard formats like YYYY-YYYY.</p>
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-stone-900 font-bold rounded-xl shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                  >
+                    Create Term
+                  </button>
+                </form>
+              </div>
+
+              {/* Academic Year List Table */}
+              <div className="lg:col-span-2 space-y-4">
+                <h3 className="text-base font-bold text-stone-800">📅 Configured School Years</h3>
+                {academicYearsLoading ? (
+                  <div className="text-center py-12"><Spinner size="md" /></div>
+                ) : academicYears.length === 0 ? (
+                  <p className="text-center text-gray-400 py-12 bg-gray-50 rounded-2xl border border-gray-250">No academic years configured.</p>
+                ) : (
+                  <div className="overflow-x-auto border border-gray-200 rounded-2xl shadow-sm">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 font-bold text-xs uppercase">
+                          <th className="px-4 py-3 text-left">Academic Year</th>
+                          <th className="px-4 py-3 text-center">Status</th>
+                          <th className="px-4 py-3 text-center">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 bg-white">
+                        {academicYears.map((ay) => (
+                          <tr key={ay._id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3.5 font-bold text-stone-800">
+                              {ay.name}
+                            </td>
+                            <td className="px-4 py-3.5 text-center">
+                              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                                ay.isActive 
+                                  ? 'bg-green-100 text-green-700 border border-green-300' 
+                                  : 'bg-gray-100 text-gray-500 border border-gray-250'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${ay.isActive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+                                {ay.isActive ? 'Active Term' : 'Archived'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3.5 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                {!ay.isActive && (
+                                  <button
+                                    onClick={() => handleActivateAcademicYear(ay._id)}
+                                    className="px-3 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 rounded-lg text-xs font-bold transition-all active:scale-95"
+                                    title="Activate Term"
+                                  >
+                                    Activate
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDeleteAcademicYear(ay._id)}
+                                  className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-650 border border-red-200 transition-all active:scale-95"
+                                  title="Delete Term"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Period Add/Edit Modal */}
           {isPeriodModalOpen && (
             <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setIsPeriodModalOpen(false)}>
@@ -1991,12 +2414,33 @@ const AdminPage = () => {
                 </h2>
                 <p className="text-gray-500 text-sm mt-1">Manage teacher profiles, access credentials, and authentication preferences.</p>
               </div>
-              <button
-                onClick={handleAddClick}
-                className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-stone-900 font-bold rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
-              >
-                <span>➕ Add Teacher</span>
-              </button>
+              <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+                <button
+                  onClick={() => {
+                    setImportType('teachers');
+                    setCsvFile(null);
+                    setCsvPreview([]);
+                    setImportSummary(null);
+                    setIsImportOpen(true);
+                    setIsImportModalOpen(true);
+                  }}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-stone-100 hover:bg-stone-200 border border-stone-200 rounded-xl text-xs font-bold text-stone-700 transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                >
+                  <span>📥 Import CSV</span>
+                </button>
+                <button
+                  onClick={handleExportTeachers}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-stone-100 hover:bg-stone-200 border border-stone-200 rounded-xl text-xs font-bold text-stone-700 transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                >
+                  <span>📤 Export CSV</span>
+                </button>
+                <button
+                  onClick={handleAddClick}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-stone-900 font-bold rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+                >
+                  <span>➕ Add Teacher</span>
+                </button>
+              </div>
             </div>
 
             <div className="p-4 sm:p-6">
@@ -2374,18 +2818,18 @@ const AdminPage = () => {
 
         {/* Class Management Tab */}
         {activeTab === 'classes' && (
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden mb-8 text-gray-900">
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden mb-8 text-gray-900 animate-fadeIn">
             <div className="bg-gray-50 border-b border-gray-200 p-6">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
                 🏫 Class & Section Management
               </h2>
-              <p className="text-gray-500 text-sm mt-1">Configure classes (Nursery to 10th), map sections, and assign class teachers.</p>
+              <p className="text-gray-500 text-sm mt-1">Configure classes, map sections, and assign class teachers dynamically.</p>
             </div>
             
             <div className="p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Add Class Form */}
               <div className="bg-stone-50 p-6 rounded-2xl border border-stone-200 h-fit space-y-5">
-                <h3 className="text-base font-bold text-stone-800">➕ Add New Class</h3>
+                <h3 className="text-base font-bold text-stone-850">➕ Add New Class</h3>
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   if (!classSection.trim()) return toast.error("Section name is required");
@@ -2394,7 +2838,7 @@ const AdminPage = () => {
                     await createClass({
                       standard: classStandard,
                       section: classSection.trim().toUpperCase(),
-                      board: settings.board || 'CBSE',
+                      board: classBoard,
                       classTeacher: classTeacherId || undefined,
                       strength: parseInt(classStrength) || 0
                     });
@@ -2412,15 +2856,19 @@ const AdminPage = () => {
                   <div>
                     <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Standard *</label>
                     <div className="flex gap-2">
-                      <select
+                      <input
+                        list="standards-list"
                         value={classStandard}
                         onChange={(e) => setClassStandard(e.target.value)}
+                        placeholder="e.g. 6th"
                         className="flex-1 px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-400 outline-none font-semibold"
-                      >
+                        required
+                      />
+                      <datalist id="standards-list">
                         {(settings.standardsList || ['Nursery', 'LKG', 'UKG', '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th']).map(std => (
-                          <option key={std} value={std}>{std}</option>
+                          <option key={std} value={std} />
                         ))}
-                      </select>
+                      </datalist>
                       <button
                         type="button"
                         onClick={async () => {
@@ -2480,12 +2928,25 @@ const AdminPage = () => {
                     <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Section *</label>
                     <input
                       type="text"
-                      maxLength="3"
+                      maxLength="15"
                       placeholder="e.g. A"
                       value={classSection}
                       onChange={(e) => setClassSection(e.target.value)}
                       className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-400 outline-none font-semibold uppercase"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Board *</label>
+                    <select
+                      value={classBoard}
+                      onChange={(e) => setClassBoard(e.target.value)}
+                      className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-400 outline-none font-semibold"
+                    >
+                      {(settings.boardsList || ['CBSE', 'STATE', 'ICSE']).map(boardOpt => (
+                        <option key={boardOpt} value={boardOpt}>{boardOpt}</option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
@@ -2525,7 +2986,31 @@ const AdminPage = () => {
 
               {/* Class List Table */}
               <div className="lg:col-span-2 space-y-4">
-                <h3 className="text-base font-bold text-stone-800">🏫 Registered Classes</h3>
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                  <h3 className="text-base font-bold text-stone-850">🏫 Registered Classes</h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setImportType('classes');
+                        setCsvFile(null);
+                        setCsvPreview([]);
+                        setImportSummary(null);
+                        setIsImportOpen(true); // handles both isImportOpen & isImportModalOpen
+                        setIsImportModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-200 rounded-lg text-xs font-bold text-stone-700 transition-all flex items-center gap-1"
+                    >
+                      📥 Import CSV
+                    </button>
+                    <button
+                      onClick={handleExportClasses}
+                      className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-200 rounded-lg text-xs font-bold text-stone-700 transition-all flex items-center gap-1"
+                    >
+                      📤 Export CSV
+                    </button>
+                  </div>
+                </div>
+
                 {classesLoading ? (
                   <div className="text-center py-12"><Spinner size="md" /></div>
                 ) : classes.length === 0 ? (
@@ -2539,6 +3024,7 @@ const AdminPage = () => {
                           <th className="px-4 py-3 text-left">Board</th>
                           <th className="px-4 py-3 text-left">Class Teacher</th>
                           <th className="px-4 py-3 text-center">Strength</th>
+                          <th className="px-4 py-3 text-center">Status</th>
                           <th className="px-4 py-3 text-center">Action</th>
                         </tr>
                       </thead>
@@ -2566,22 +3052,57 @@ const AdminPage = () => {
                               {cls.strength || 0}
                             </td>
                             <td className="px-4 py-3.5 text-center">
-                              <button
-                                onClick={async () => {
-                                  if (!window.confirm(`Delete class ${cls.standard}-${cls.section}?`)) return;
-                                  try {
-                                    await deleteClass(cls._id);
-                                    toast.success("Class deleted successfully");
-                                    fetchClasses();
-                                  } catch (err) {
-                                    toast.error("Failed to delete class");
-                                  }
-                                }}
-                                className="w-8 h-8 rounded-full bg-red-50 text-red-500 hover:bg-red-500 hover:text-white border border-red-200 transition-all flex items-center justify-center mx-auto"
-                                title="Delete Class"
-                              >
-                                🗑️
-                              </button>
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                cls.isActive !== false 
+                                  ? 'bg-green-100 text-green-750' 
+                                  : 'bg-gray-105 text-gray-500'
+                              }`}>
+                                {cls.isActive !== false ? 'Active' : 'Disabled'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3.5 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    setEditingClass({
+                                      ...cls,
+                                      classTeacher: cls.classTeacher?._id || cls.classTeacher || ''
+                                    });
+                                    setIsClassEditModalOpen(true);
+                                  }}
+                                  className="w-7 h-7 rounded-full bg-blue-50 text-blue-650 hover:bg-blue-500 hover:text-white border border-blue-200 transition-all flex items-center justify-center"
+                                  title="Edit Class"
+                                >
+                                  ✏️
+                                </button>
+                                <button
+                                  onClick={() => handleToggleClassActive(cls, cls.isActive === false)}
+                                  className={`w-7 h-7 rounded-full border transition-all flex items-center justify-center ${
+                                    cls.isActive !== false
+                                      ? 'bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white border-amber-200'
+                                      : 'bg-stone-50 text-stone-500 hover:bg-stone-500 hover:text-white border-stone-200'
+                                  }`}
+                                  title={cls.isActive !== false ? "Disable Class" : "Enable Class"}
+                                >
+                                  🔄
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (!window.confirm(`Delete class ${cls.standard}-${cls.section}?`)) return;
+                                    try {
+                                      await deleteClass(cls._id);
+                                      toast.success("Class deleted successfully");
+                                      fetchClasses();
+                                    } catch (err) {
+                                      toast.error("Failed to delete class");
+                                    }
+                                  }}
+                                  className="w-7 h-7 rounded-full bg-red-50 text-red-500 hover:bg-red-500 hover:text-white border border-red-205 transition-all flex items-center justify-center"
+                                  title="Delete Class"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -2596,18 +3117,18 @@ const AdminPage = () => {
 
         {/* Subject Management Tab */}
         {activeTab === 'subjects' && (
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden mb-8 text-gray-900">
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden mb-8 text-gray-900 animate-fadeIn">
             <div className="bg-gray-50 border-b border-gray-200 p-6">
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
                 📚 Subject Management
               </h2>
-              <p className="text-gray-500 text-sm mt-1">Manage the global subject catalogue for the school curriculum.</p>
+              <p className="text-gray-500 text-sm mt-1">Manage the global subject catalogue for the school curriculum dynamically.</p>
             </div>
 
             <div className="p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Add Subject Form */}
               <div className="bg-stone-50 p-6 rounded-2xl border border-stone-200 h-fit space-y-5">
-                <h3 className="text-base font-bold text-stone-800">📚 Add New Subject</h3>
+                <h3 className="text-base font-bold text-stone-850">📚 Add New Subject</h3>
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   if (!subjectName.trim()) return toast.error("Subject name is required");
@@ -2646,7 +3167,31 @@ const AdminPage = () => {
 
               {/* Subject List Table */}
               <div className="lg:col-span-2 space-y-4">
-                <h3 className="text-base font-bold text-stone-800">📚 Subject Catalogue</h3>
+                <div className="flex justify-between items-center flex-wrap gap-2">
+                  <h3 className="text-base font-bold text-stone-850">📚 Subject Catalogue</h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setImportType('subjects');
+                        setCsvFile(null);
+                        setCsvPreview([]);
+                        setImportSummary(null);
+                        setIsImportOpen(true);
+                        setIsImportModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-200 rounded-lg text-xs font-bold text-stone-700 transition-all flex items-center gap-1"
+                    >
+                      📥 Import CSV
+                    </button>
+                    <button
+                      onClick={handleExportSubjects}
+                      className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-200 rounded-lg text-xs font-bold text-stone-700 transition-all flex items-center gap-1"
+                    >
+                      📤 Export CSV
+                    </button>
+                  </div>
+                </div>
+
                 {subjectsLoading ? (
                   <div className="text-center py-12"><Spinner size="md" /></div>
                 ) : subjects.length === 0 ? (
@@ -2657,6 +3202,7 @@ const AdminPage = () => {
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-200 text-gray-500 font-bold text-xs uppercase">
                           <th className="px-4 py-3 text-left">Subject Name</th>
+                          <th className="px-4 py-3 text-center">Status</th>
                           <th className="px-4 py-3 text-center">Action</th>
                         </tr>
                       </thead>
@@ -2664,25 +3210,57 @@ const AdminPage = () => {
                         {subjects.map((sub) => (
                           <tr key={sub._id} className="hover:bg-gray-50 transition-colors">
                             <td className="px-4 py-3.5 font-bold text-stone-800">
-                              {sub.name}
+                              {sub.name} {sub.code ? `(${sub.code})` : ''}
                             </td>
                             <td className="px-4 py-3.5 text-center">
-                              <button
-                                onClick={async () => {
-                                  if (!window.confirm(`Delete subject "${sub.name}"? This will also delete any teacher assignments to this subject.`)) return;
-                                  try {
-                                    await deleteSubject(sub._id);
-                                    toast.success("Subject deleted successfully");
-                                    fetchSubjects();
-                                  } catch (err) {
-                                    toast.error("Failed to delete subject");
-                                  }
-                                }}
-                                className="w-8 h-8 rounded-full bg-red-50 text-red-500 hover:bg-red-500 hover:text-white border border-red-200 transition-all flex items-center justify-center mx-auto"
-                                title="Delete Subject"
-                              >
-                                🗑️
-                              </button>
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                sub.isActive !== false 
+                                  ? 'bg-green-100 text-green-750' 
+                                  : 'bg-gray-100 text-gray-500'
+                              }`}>
+                                {sub.isActive !== false ? 'Active' : 'Disabled'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3.5 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    setEditingSubject(sub);
+                                    setIsSubjectEditModalOpen(true);
+                                  }}
+                                  className="w-7 h-7 rounded-full bg-blue-50 text-blue-650 hover:bg-blue-500 hover:text-white border border-blue-200 transition-all flex items-center justify-center"
+                                  title="Edit Subject"
+                                >
+                                  ✏️
+                                </button>
+                                <button
+                                  onClick={() => handleToggleSubjectActive(sub, sub.isActive === false)}
+                                  className={`w-7 h-7 rounded-full border transition-all flex items-center justify-center ${
+                                    sub.isActive !== false
+                                      ? 'bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white border-amber-200'
+                                      : 'bg-stone-50 text-stone-500 hover:bg-stone-500 hover:text-white border-stone-200'
+                                  }`}
+                                  title={sub.isActive !== false ? "Disable Subject" : "Enable Subject"}
+                                >
+                                  🔄
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (!window.confirm(`Delete subject "${sub.name}"? This will also delete any teacher assignments to this subject.`)) return;
+                                    try {
+                                      await deleteSubject(sub._id);
+                                      toast.success("Subject deleted successfully");
+                                      fetchSubjects();
+                                    } catch (err) {
+                                      toast.error("Failed to delete subject");
+                                    }
+                                  }}
+                                  className="w-7 h-7 rounded-full bg-red-50 text-red-500 hover:bg-red-500 hover:text-white border border-red-200 transition-all flex items-center justify-center"
+                                  title="Delete Subject"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -3860,6 +4438,325 @@ const AdminPage = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Class Edit Modal */}
+      {isClassEditModalOpen && editingClass && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setIsClassEditModalOpen(false); setEditingClass(null); }}>
+          <div className="bg-white border border-gray-200 rounded-3xl shadow-2xl p-8 w-full max-w-md relative overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => { setIsClassEditModalOpen(false); setEditingClass(null); }}
+              className="absolute top-6 right-6 text-gray-500 hover:text-gray-900 bg-gray-100 rounded-full p-1 transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              ✏️ Edit Class Structure
+            </h3>
+
+            <form onSubmit={handleClassEditSubmit} className="space-y-5 text-gray-900">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Standard *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingClass.standard}
+                  onChange={(e) => setEditingClass({ ...editingClass, standard: e.target.value })}
+                  className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Section *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingClass.section}
+                  onChange={(e) => setEditingClass({ ...editingClass, section: e.target.value })}
+                  className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all font-semibold uppercase"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Board *</label>
+                <select
+                  value={editingClass.board}
+                  onChange={(e) => setEditingClass({ ...editingClass, board: e.target.value })}
+                  className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all font-semibold"
+                >
+                  {(settings.boardsList || ['CBSE', 'STATE', 'ICSE']).map(boardOpt => (
+                    <option key={boardOpt} value={boardOpt}>{boardOpt}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Class Teacher (Optional)</label>
+                <select
+                  value={editingClass.classTeacher || ''}
+                  onChange={(e) => setEditingClass({ ...editingClass, classTeacher: e.target.value })}
+                  className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all font-semibold"
+                >
+                  <option value="">-- Select Teacher --</option>
+                  {(Array.isArray(employees) ? employees : []).filter(emp => emp.role === 'teacher').map(tch => (
+                    <option key={tch._id} value={tch._id}>{tch.name} ({tch.employeeId})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Class Strength</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={editingClass.strength || 0}
+                  onChange={(e) => setEditingClass({ ...editingClass, strength: parseInt(e.target.value) || 0 })}
+                  className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all font-semibold"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-200">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Active Status</label>
+                  <p className="text-xs text-gray-500">Allow schedules and attendance for this class</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingClass.isActive !== false}
+                    onChange={(e) => setEditingClass({ ...editingClass, isActive: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => { setIsClassEditModalOpen(false); setEditingClass(null); }}
+                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-xl text-gray-700 font-bold transition-all active:scale-95 text-center"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-stone-900 font-bold rounded-xl shadow-lg transition-all active:scale-95 text-center"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Subject Edit Modal */}
+      {isSubjectEditModalOpen && editingSubject && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setIsSubjectEditModalOpen(false); setEditingSubject(null); }}>
+          <div className="bg-white border border-gray-200 rounded-3xl shadow-2xl p-8 w-full max-w-md relative overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => { setIsSubjectEditModalOpen(false); setEditingSubject(null); }}
+              className="absolute top-6 right-6 text-gray-500 hover:text-gray-900 bg-gray-100 rounded-full p-1 transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              ✏️ Edit Subject Details
+            </h3>
+
+            <form onSubmit={handleSubjectEditSubmit} className="space-y-5 text-gray-900">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Subject Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingSubject.name}
+                  onChange={(e) => setEditingSubject({ ...editingSubject, name: e.target.value })}
+                  className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Subject Code</label>
+                <input
+                  type="text"
+                  value={editingSubject.code || ''}
+                  onChange={(e) => setEditingSubject({ ...editingSubject, code: e.target.value })}
+                  placeholder="e.g. MATH-6"
+                  className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Description</label>
+                <textarea
+                  value={editingSubject.description || ''}
+                  onChange={(e) => setEditingSubject({ ...editingSubject, description: e.target.value })}
+                  placeholder="Subject syllabus description..."
+                  rows="3"
+                  className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all font-semibold text-sm"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-200">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Active Status</label>
+                  <p className="text-xs text-gray-500">Allow teacher assignment for this subject</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingSubject.isActive !== false}
+                    onChange={(e) => setEditingSubject({ ...editingSubject, isActive: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+              </div>
+
+              <div className="flex gap-3 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => { setIsSubjectEditModalOpen(false); setEditingSubject(null); }}
+                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-xl text-gray-700 font-bold transition-all active:scale-95 text-center"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-stone-900 font-bold rounded-xl shadow-lg transition-all active:scale-95 text-center"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Bulk Import Modal */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => { setIsImportModalOpen(false); setImportSummary(null); setCsvPreview([]); }}>
+          <div className="bg-white border border-gray-200 rounded-3xl shadow-2xl p-8 w-full max-w-2xl relative overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => { setIsImportModalOpen(false); setImportSummary(null); setCsvPreview([]); }}
+              className="absolute top-6 right-6 text-gray-500 hover:text-gray-900 bg-gray-100 rounded-full p-1 transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2 capitalize">
+              📥 Bulk Import {importType}
+            </h3>
+            <p className="text-xs text-gray-500 mb-6">
+              Upload a CSV file containing records to import into the school database.
+            </p>
+
+            <div className="space-y-6">
+              <div className="p-6 border-2 border-dashed border-gray-300 rounded-2xl flex flex-col items-center justify-center bg-stone-50">
+                <span className="text-3xl mb-2">📁</span>
+                <p className="text-sm font-semibold text-gray-700 mb-1">Select CSV file to upload</p>
+                <p className="text-xs text-gray-400 mb-4">Supported: .csv file format</p>
+                <label className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-stone-900 font-bold rounded-xl text-xs transition-all cursor-pointer active:scale-95">
+                  Browse File
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleCSVUpload}
+                    className="hidden"
+                  />
+                </label>
+                {csvFile && (
+                  <p className="text-xs font-mono text-emerald-605 mt-3 font-semibold">
+                    ✓ Selected: {csvFile.name} ({(csvFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
+              </div>
+
+              {/* Data Preview */}
+              {csvPreview.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-bold text-gray-800">📊 CSV File Preview ({csvPreview.length} records parsed)</h4>
+                  <div className="overflow-x-auto border border-gray-200 rounded-xl max-h-44 text-xs">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50 text-gray-500 font-bold">
+                        <tr>
+                          {Object.keys(csvPreview[0] || {}).map(key => (
+                            <th key={key} className="px-3 py-2 text-left">{key}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100 text-gray-700">
+                        {csvPreview.slice(0, 5).map((row, idx) => (
+                          <tr key={idx}>
+                            {Object.values(row).map((val, vIdx) => (
+                              <td key={vIdx} className="px-3 py-2 whitespace-nowrap truncate max-w-[150px]">{String(val)}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {csvPreview.length > 5 && (
+                    <p className="text-[10px] text-gray-400 italic">Showing first 5 rows only...</p>
+                  )}
+                </div>
+              )}
+
+              {/* Import Summary Results */}
+              {importSummary && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs space-y-2">
+                  <h4 className="font-bold text-emerald-800 text-sm">✓ Import Results Summary</h4>
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div className="bg-white p-2 rounded-lg border border-emerald-100">
+                      <span className="block text-gray-500 font-bold uppercase">Success</span>
+                      <span className="text-base font-black text-emerald-600">{importSummary.created || importSummary.successCount || 0}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-emerald-100">
+                      <span className="block text-gray-500 font-bold uppercase">Duplicates</span>
+                      <span className="text-base font-black text-amber-605">{importSummary.duplicates || importSummary.duplicateCount || 0}</span>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-emerald-100">
+                      <span className="block text-gray-500 font-bold uppercase">Errors</span>
+                      <span className="text-base font-black text-red-600">{importSummary.errors || importSummary.errorCount || 0}</span>
+                    </div>
+                  </div>
+                  {importSummary.messages && importSummary.messages.length > 0 && (
+                    <div className="mt-3 bg-white p-2 rounded-lg border border-emerald-100 max-h-24 overflow-y-auto font-mono text-[10px]">
+                      {importSummary.messages.map((m, idx) => <p key={idx}>{m}</p>)}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => { setIsImportModalOpen(false); setImportSummary(null); setCsvPreview([]); }}
+                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-xl text-gray-700 font-bold transition-all active:scale-95 text-center"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={submitCSVImport}
+                  disabled={isImporting || csvPreview.length === 0}
+                  className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-stone-900 font-bold rounded-xl shadow-lg transition-all active:scale-95 text-center disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isImporting ? <><span className="w-4 h-4 border-2 border-stone-900 border-t-transparent rounded-full animate-spin"></span> Importing...</> : 'Start Import'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

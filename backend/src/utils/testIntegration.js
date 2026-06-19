@@ -128,6 +128,8 @@ async function runIntegrationTest() {
       day: timetableDay,
       period: 1,
       timeSlot: '09:00-09:45',
+      startTime: '09:00',
+      endTime: '09:45',
       teacher: raviProfile._id,
       subject: testSubject._id
     });
