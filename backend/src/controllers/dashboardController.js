@@ -7,6 +7,7 @@ import Class from '../models/Class.js';
 import Subject from '../models/Subject.js';
 import ClassSession from '../models/ClassSession.js';
 import ClassAuditLog from '../models/ClassAuditLog.js';
+import PeriodConfiguration from '../models/PeriodConfiguration.js';
 
 
 const getLocalDateString = () => {
@@ -121,6 +122,24 @@ const getAllTimetableForDate = async (dateStr, day) => {
       allEntries.push(...defaults);
     }
   }
+
+  const periods = await PeriodConfiguration.find().lean();
+  const periodMap = {};
+  periods.forEach(p => {
+    if (p.periodNumber !== null && p.periodNumber !== undefined) {
+      periodMap[p.periodNumber] = p;
+    }
+  });
+
+  allEntries.forEach(entry => {
+    const pConfig = periodMap[entry.period];
+    if (pConfig) {
+      entry.startTime = pConfig.startTime;
+      entry.endTime = pConfig.endTime;
+      entry.timeSlot = `${pConfig.startTime}-${pConfig.endTime}`;
+    }
+  });
+
   return allEntries;
 };
 
@@ -202,6 +221,23 @@ export const getTeacherDashboard = async (req, res) => {
         .populate('subject')
         .lean();
       }
+
+      const periods = await PeriodConfiguration.find().lean();
+      const periodMap = {};
+      periods.forEach(p => {
+        if (p.periodNumber !== null && p.periodNumber !== undefined) {
+          periodMap[p.periodNumber] = p;
+        }
+      });
+
+      todayEntries.forEach(entry => {
+        const pConfig = periodMap[entry.period];
+        if (pConfig) {
+          entry.startTime = pConfig.startTime;
+          entry.endTime = pConfig.endTime;
+          entry.timeSlot = `${pConfig.startTime}-${pConfig.endTime}`;
+        }
+      });
 
       // Sort entries by period
       todayEntries.sort((a, b) => a.period - b.period);

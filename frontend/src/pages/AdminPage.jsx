@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
-import { loginWithPassword, getProfile, getCompanySettings, updateCompanySettings, getConsolidatedReport, getDetailsReport, getAdminEmployees, updateEmployeeSettings, deleteEmployee, exportAttendanceExcel, resetEmployeePassword, getDailyStatus, uploadEmployeeDocument, downloadEmployeeDocument, getRoles, createRole, updateRole, deleteRole, getClasses, createClass, deleteClass, getSubjects, createSubject, deleteSubject, getMappings, createMapping, deleteMapping, addTeacher, getTimetables, createTimetableEntry, updateTimetableEntry, deleteTimetableEntry } from '../services/authService';
+import { loginWithPassword, getProfile, getCompanySettings, updateCompanySettings, getConsolidatedReport, getDetailsReport, getAdminEmployees, updateEmployeeSettings, deleteEmployee, exportAttendanceExcel, resetEmployeePassword, getDailyStatus, uploadEmployeeDocument, downloadEmployeeDocument, getRoles, createRole, updateRole, deleteRole, getClasses, createClass, deleteClass, getSubjects, createSubject, deleteSubject, getMappings, createMapping, deleteMapping, addTeacher, getTimetables, createTimetableEntry, updateTimetableEntry, deleteTimetableEntry, getPeriods, createPeriod, updatePeriod, deletePeriod } from '../services/authService';
 import { useTranslation } from 'react-i18next';
 import Spinner from '../components/ui/Spinner';
 import useGeolocation from '../hooks/useGeolocation';
@@ -134,6 +134,19 @@ const AdminPage = () => {
     endTime: '09:45',
     teacherId: '',
     subjectId: ''
+  });
+
+  // Period Configuration States
+  const [periods, setPeriods] = useState([]);
+  const [periodsLoading, setPeriodsLoading] = useState(false);
+  const [editingPeriod, setEditingPeriod] = useState(null);
+  const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
+  const [periodForm, setPeriodForm] = useState({
+    periodNumber: '',
+    periodName: '',
+    startTime: '',
+    endTime: '',
+    isBreak: false
   });
 
   // Roles Management
@@ -355,6 +368,20 @@ const AdminPage = () => {
     }
   }, []);
 
+  const fetchPeriods = useCallback(async () => {
+    try {
+      setPeriodsLoading(true);
+      const res = await getPeriods();
+      if (res?.status && Array.isArray(res.data)) {
+        setPeriods(res.data);
+      }
+    } catch (err) {
+      console.error("Failed to load periods:", err);
+    } finally {
+      setPeriodsLoading(false);
+    }
+  }, []);
+
   const fetchEmployees = useCallback(async () => {
     try {
       setEmpLoading(true);
@@ -482,6 +509,7 @@ const AdminPage = () => {
     if (activeTab === 'settings') {
       fetchSettings();
       fetchEmployees();
+      fetchPeriods();
     }
     if (activeTab === 'consolidated') fetchConsolidated(); 
     if (activeTab === 'details' || activeTab === 'individual_details') fetchDetails(); 
@@ -508,8 +536,9 @@ const AdminPage = () => {
       fetchClasses();
       fetchEmployees();
       fetchSubjects();
+      fetchPeriods();
     }
-  }, [activeTab, reportMonth, reportYear, deptFilter, dailyStatusDate, fetchDailyStatus, fetchRoles, fetchSettings, fetchEmployees, fetchClasses, fetchSubjects, fetchMappings, fetchTimetableEntries]);
+  }, [activeTab, reportMonth, reportYear, deptFilter, dailyStatusDate, fetchDailyStatus, fetchRoles, fetchSettings, fetchEmployees, fetchClasses, fetchSubjects, fetchMappings, fetchTimetableEntries, fetchPeriods]);
 
   // Real-time polling every 15 seconds
   useEffect(() => {
@@ -635,6 +664,68 @@ const AdminPage = () => {
     }
   };
 
+  // Period Configuration Handlers
+  const handlePeriodSubmit = async (e) => {
+    e.preventDefault();
+    if (!periodForm.periodName || !periodForm.startTime || !periodForm.endTime) {
+      return toast.error('Period name, start time, and end time are required');
+    }
+    try {
+      if (editingPeriod) {
+        const res = await updatePeriod(editingPeriod._id, periodForm);
+        if (res?.status) {
+          toast.success('Period updated successfully');
+        } else {
+          toast.error(res?.message || 'Failed to update period');
+        }
+      } else {
+        const res = await createPeriod(periodForm);
+        if (res?.status) {
+          toast.success('Period created successfully');
+        } else {
+          toast.error(res?.message || 'Failed to create period');
+        }
+      }
+      setIsPeriodModalOpen(false);
+      setEditingPeriod(null);
+      setPeriodForm({ periodNumber: '', periodName: '', startTime: '', endTime: '', isBreak: false });
+      fetchPeriods();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to save period');
+    }
+  };
+
+  const handlePeriodDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this period?')) return;
+    try {
+      const res = await deletePeriod(id);
+      if (res?.status) {
+        toast.success('Period deleted successfully');
+        fetchPeriods();
+      } else {
+        toast.error(res?.message || 'Failed to delete period');
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to delete period');
+    }
+  };
+
+  // Helper: get sorted non-break periods for dynamic period numbering
+  const sortedPeriods = [...periods].sort((a, b) => {
+    const aMin = a.startTime ? parseInt(a.startTime.split(':')[0]) * 60 + parseInt(a.startTime.split(':')[1]) : 0;
+    const bMin = b.startTime ? parseInt(b.startTime.split(':')[0]) * 60 + parseInt(b.startTime.split(':')[1]) : 0;
+    return aMin - bMin;
+  });
+
+  // Helper: build a periodMap from loaded periods for timetable form defaults
+  const periodConfigMap = {};
+  periods.forEach(p => {
+    if (p.periodNumber !== null && p.periodNumber !== undefined && !p.isBreak) {
+      periodConfigMap[p.periodNumber] = p;
+    }
+  });
+  const activePeriodNumbers = periods.filter(p => !p.isBreak && p.periodNumber).map(p => p.periodNumber).sort((a, b) => a - b);
+
   const escapeCSV = (val) => {
     if (val === undefined || val === null) return '';
     const str = String(val);
@@ -758,7 +849,7 @@ const AdminPage = () => {
                     ${dayEntries.map(e => `
                       <tr>
                         <td style="border: 1px solid #e2e8f0; padding: 8px 10px; font-weight: 600; color: #d97706; font-family: monospace;">P${e.period} (${e.timeSlot})</td>
-                        <td style="border: 1px solid #e2e8f0; padding: 8px 10px; font-weight: bold;">Class ${e.class ? `${e.class.standard}-${e.class.section} (${e.class.board})` : 'Unknown'}</td>
+                        <td style="border: 1px solid #e2e8f0; padding: 8px 10px; font-weight: bold;">${e.className || (e.class ? `${e.class.standard}-${e.class.section}` : 'Unknown')}</td>
                         <td style="border: 1px solid #e2e8f0; padding: 8px 10px;">${e.subject?.name || 'Unknown'}</td>
                         <td style="border: 1px solid #e2e8f0; padding: 8px 10px;">👤 ${e.teacher?.name || 'Unknown'}</td>
                       </tr>
@@ -785,7 +876,7 @@ const AdminPage = () => {
             <tbody>
               ${timetableEntries.map(e => `
                 <tr>
-                  <td style="border: 1px solid #e2e8f0; padding: 8px 10px; font-weight: bold;">Class ${e.class ? `${e.class.standard}-${e.class.section} (${e.class.board})` : 'Unknown'}</td>
+                  <td style="border: 1px solid #e2e8f0; padding: 8px 10px; font-weight: bold;">${e.className || (e.class ? `${e.class.standard}-${e.class.section}` : 'Unknown')}</td>
                   <td style="border: 1px solid #e2e8f0; padding: 8px 10px;">${e.day}</td>
                   <td style="border: 1px solid #e2e8f0; padding: 8px 10px; font-weight: 600; color: #d97706; font-family: monospace;">P${e.period} (${e.timeSlot})</td>
                   <td style="border: 1px solid #e2e8f0; padding: 8px 10px;">${e.subject?.name || 'Unknown'}</td>
@@ -800,7 +891,7 @@ const AdminPage = () => {
       printWindow.document.write(`
         <html>
           <head>
-            <title>\${title}</title>
+            <title>${title}</title>
             <style>
               body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; color: #1e293b; }
               h1 { text-align: center; font-size: 20px; margin-bottom: 25px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -811,8 +902,8 @@ const AdminPage = () => {
             </style>
           </head>
           <body>
-            <h1>\${title}</h1>
-            \${contentHtml}
+            <h1>${title}</h1>
+            ${contentHtml}
             <script>
               window.onload = function() {
                 window.print();
@@ -1518,10 +1609,228 @@ const AdminPage = () => {
                       </div>
                     </div>
                   </div>
+                  {/* Period Configuration */}
+                  <div className="bg-stone-50 p-6 rounded-2xl border border-stone-200 space-y-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-bold text-amber-600 uppercase tracking-wider">⏰ Period Configuration</h3>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Define periods, breaks, and their timings. These are used across timetables, dashboards, and monitoring.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingPeriod(null);
+                          const nextNum = periods.filter(p => !p.isBreak).length + 1;
+                          setPeriodForm({ periodNumber: nextNum, periodName: `P${nextNum}`, startTime: '', endTime: '', isBreak: false });
+                          setIsPeriodModalOpen(true);
+                        }}
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-stone-900 font-bold rounded-xl text-sm transition-all flex items-center gap-2 shadow-md"
+                      >
+                        ➕ Add Period
+                      </button>
+                    </div>
+
+                    {periods.length === 0 ? (
+                      <div className="text-center py-8 text-gray-400">
+                        <p className="text-2xl mb-2">📋</p>
+                        <p className="font-semibold">No periods configured yet</p>
+                        <p className="text-xs mt-1">Click "Add Period" to create your first period or break slot.</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-stone-200">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-stone-100 text-gray-700 text-xs uppercase tracking-wider">
+                              <th className="px-4 py-3 text-left font-bold">#</th>
+                              <th className="px-4 py-3 text-left font-bold">Name</th>
+                              <th className="px-4 py-3 text-left font-bold">Start Time</th>
+                              <th className="px-4 py-3 text-left font-bold">End Time</th>
+                              <th className="px-4 py-3 text-center font-bold">Type</th>
+                              <th className="px-4 py-3 text-center font-bold">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-stone-200">
+                            {sortedPeriods.map((p, idx) => (
+                              <tr
+                                key={p._id}
+                                className={`${p.isBreak ? 'bg-orange-50/60' : 'bg-white'} hover:bg-amber-50/40 transition-colors`}
+                              >
+                                <td className="px-4 py-3 font-bold text-gray-600">
+                                  {p.isBreak ? '—' : p.periodNumber || idx + 1}
+                                </td>
+                                <td className="px-4 py-3 font-semibold text-gray-900 flex items-center gap-2">
+                                  {p.isBreak && <span className="text-orange-500">☕</span>}
+                                  {p.periodName}
+                                </td>
+                                <td className="px-4 py-3 text-gray-700 font-mono">
+                                  {p.startTime ? (() => {
+                                    const [h, m] = p.startTime.split(':');
+                                    const hr = parseInt(h);
+                                    return `${hr > 12 ? hr - 12 : hr === 0 ? 12 : hr}:${m} ${hr >= 12 ? 'PM' : 'AM'}`;
+                                  })() : '—'}
+                                </td>
+                                <td className="px-4 py-3 text-gray-700 font-mono">
+                                  {p.endTime ? (() => {
+                                    const [h, m] = p.endTime.split(':');
+                                    const hr = parseInt(h);
+                                    return `${hr > 12 ? hr - 12 : hr === 0 ? 12 : hr}:${m} ${hr >= 12 ? 'PM' : 'AM'}`;
+                                  })() : '—'}
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${p.isBreak ? 'bg-orange-100 text-orange-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                    {p.isBreak ? 'Break' : 'Period'}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setEditingPeriod(p);
+                                        setPeriodForm({
+                                          periodNumber: p.periodNumber || '',
+                                          periodName: p.periodName || '',
+                                          startTime: p.startTime || '',
+                                          endTime: p.endTime || '',
+                                          isBreak: !!p.isBreak,
+                                        });
+                                        setIsPeriodModalOpen(true);
+                                      }}
+                                      className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 transition-all"
+                                      title="Edit Period"
+                                    >
+                                      ✏️
+                                    </button>
+                                    <button
+                                      onClick={() => handlePeriodDelete(p._id)}
+                                      className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition-all"
+                                      title="Delete Period"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    <p className="text-xs text-gray-400 italic">
+                      💡 Tip: All timetable entries, dashboards, and monitoring views will automatically use these period timings.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
           </div>
+
+          {/* Period Add/Edit Modal */}
+          {isPeriodModalOpen && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setIsPeriodModalOpen(false)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="bg-gradient-to-r from-amber-500 to-yellow-500 p-5">
+                  <h3 className="text-lg font-bold text-stone-900">
+                    {editingPeriod ? '✏️ Edit Period' : '➕ Add New Period'}
+                  </h3>
+                </div>
+                <form onSubmit={handlePeriodSubmit} className="p-6 space-y-5">
+                  {/* Period Type Toggle */}
+                  <div className="flex items-center gap-4 p-3 bg-stone-50 rounded-xl border border-stone-200">
+                    <span className="text-sm font-bold text-gray-700">Type:</span>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="periodType"
+                        checked={!periodForm.isBreak}
+                        onChange={() => setPeriodForm(f => ({ ...f, isBreak: false }))}
+                        className="accent-amber-500"
+                      />
+                      <span className="text-sm font-semibold text-gray-700">📘 Period</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="periodType"
+                        checked={!!periodForm.isBreak}
+                        onChange={() => setPeriodForm(f => ({ ...f, isBreak: true, periodNumber: '' }))}
+                        className="accent-orange-500"
+                      />
+                      <span className="text-sm font-semibold text-gray-700">☕ Break</span>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    {!periodForm.isBreak && (
+                      <div>
+                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Period Number</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={periodForm.periodNumber}
+                          onChange={(e) => setPeriodForm(f => ({ ...f, periodNumber: e.target.value }))}
+                          className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-xl text-gray-900 font-bold focus:ring-2 focus:ring-amber-400 outline-none"
+                          placeholder="1"
+                        />
+                      </div>
+                    )}
+                    <div className={periodForm.isBreak ? 'col-span-2' : ''}>
+                      <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={periodForm.periodName}
+                        onChange={(e) => setPeriodForm(f => ({ ...f, periodName: e.target.value }))}
+                        className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-xl text-gray-900 font-semibold focus:ring-2 focus:ring-amber-400 outline-none"
+                        placeholder={periodForm.isBreak ? 'e.g. Lunch Break' : 'e.g. P1'}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Start Time</label>
+                      <input
+                        type="time"
+                        value={periodForm.startTime}
+                        onChange={(e) => setPeriodForm(f => ({ ...f, startTime: e.target.value }))}
+                        className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-xl text-gray-900 font-bold focus:ring-2 focus:ring-amber-400 outline-none"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">End Time</label>
+                      <input
+                        type="time"
+                        value={periodForm.endTime}
+                        onChange={(e) => setPeriodForm(f => ({ ...f, endTime: e.target.value }))}
+                        className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-xl text-gray-900 font-bold focus:ring-2 focus:ring-amber-400 outline-none"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setIsPeriodModalOpen(false); setEditingPeriod(null); }}
+                      className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-stone-900 font-bold rounded-xl transition-all shadow-lg"
+                    >
+                      {editingPeriod ? 'Update Period' : 'Add Period'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
 
           {/* Warning Banner */}
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 mb-8 flex items-start gap-3">
@@ -2644,7 +2953,7 @@ const AdminPage = () => {
                   >
                     {classes.map(cls => (
                       <option key={cls._id} value={cls._id}>
-                        Class {cls.standard} - {cls.section} ({cls.board})
+                        Class {cls.standard} - {cls.section}
                       </option>
                     ))}
                   </select>
@@ -2697,7 +3006,7 @@ const AdminPage = () => {
                                           P{e.period} ({e.timeSlot})
                                         </td>
                                         <td className="py-3 px-3 font-bold text-stone-900">
-                                          {e.class ? `${e.class.standard} - ${e.class.section} (${e.class.board})` : 'Unknown'}
+                                          {e.className || (e.class ? `${e.class.standard}-${e.class.section}` : 'Unknown')}
                                         </td>
                                         <td className="py-3 px-3 font-bold text-stone-800">
                                           {e.subject?.name || 'Unknown'}
@@ -2783,10 +3092,14 @@ const AdminPage = () => {
                           <thead>
                             <tr className="bg-gray-150">
                               <th className="border border-gray-300 p-3 w-24 bg-gray-50 text-stone-700 font-extrabold uppercase text-center">Day / Period</th>
-                              {[1, 2, 3, 4, 5, 6, 7, 8].map(pNum => (
+                              {(activePeriodNumbers.length > 0 ? activePeriodNumbers : [1, 2, 3, 4, 5, 6, 7, 8]).map(pNum => (
                                 <th key={pNum} className="border border-gray-300 p-3 text-stone-700 font-extrabold uppercase text-center">
-                                  Period {pNum}
-                                  {(() => {
+                                  {periodConfigMap[pNum]?.periodName || `Period ${pNum}`}
+                                  {periodConfigMap[pNum] ? (
+                                    <span className="block text-[10px] font-mono font-medium text-gray-500 mt-1">
+                                      ({periodConfigMap[pNum].startTime}-{periodConfigMap[pNum].endTime})
+                                    </span>
+                                  ) : (() => {
                                     const found = timetableEntries.find(e => e.period === pNum);
                                     return found ? <span className="block text-[10px] font-mono font-medium text-gray-500 mt-1">({found.timeSlot})</span> : null;
                                   })()}
@@ -2798,7 +3111,7 @@ const AdminPage = () => {
                             {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map(dayName => (
                               <tr key={dayName} className="hover:bg-gray-50/20">
                                 <td className="border border-gray-300 p-3 font-extrabold text-stone-900 bg-gray-50 text-center">{dayName}</td>
-                                {[1, 2, 3, 4, 5, 6, 7, 8].map(pNum => {
+                                {(activePeriodNumbers.length > 0 ? activePeriodNumbers : [1, 2, 3, 4, 5, 6, 7, 8]).map(pNum => {
                                   const slot = timetableEntries.find(
                                     e => e.class?._id === selectedTimetableClass && e.day === dayName && e.period === pNum
                                   );
@@ -2847,23 +3160,13 @@ const AdminPage = () => {
                                         <button
                                           onClick={() => {
                                             setEditingTimetableEntry(null);
-                                            const defaultSlots = {
-                                              1: { s: '09:00', e: '09:45' },
-                                              2: { s: '09:45', e: '10:30' },
-                                              3: { s: '10:45', e: '11:30' },
-                                              4: { s: '11:30', e: '12:15' },
-                                              5: { s: '13:00', e: '13:45' },
-                                              6: { s: '13:45', e: '14:30' },
-                                              7: { s: '14:45', e: '15:30' },
-                                              8: { s: '15:30', e: '16:15' }
-                                            };
-                                            const dSlot = defaultSlots[pNum] || { s: '09:00', e: '09:45' };
+                                            const pConfig = periodConfigMap[pNum];
                                             setTimetableForm({
                                               classId: selectedTimetableClass,
                                               day: dayName,
                                               period: pNum,
-                                              startTime: dSlot.s,
-                                              endTime: dSlot.e,
+                                              startTime: pConfig?.startTime || '09:00',
+                                              endTime: pConfig?.endTime || '09:45',
                                               teacherId: employees.filter(emp => emp.role === 'teacher')[0]?._id || '',
                                               subjectId: subjects[0]?._id || ''
                                             });
@@ -2909,7 +3212,7 @@ const AdminPage = () => {
                               {timetableEntries.map((e) => (
                                 <tr key={e._id} className="hover:bg-gray-50 transition-colors">
                                   <td className="px-4 py-3.5 font-bold">
-                                    {e.class ? `Class ${e.class.standard} - ${e.class.section} (${e.class.board})` : <span className="text-red-500 italic">Deleted Class</span>}
+                                    {e.className || (e.class ? `${e.class.standard}-${e.class.section}` : <span className="text-red-500 italic">Deleted Class</span>)}
                                   </td>
                                   <td className="px-4 py-3.5 font-bold text-stone-700">{e.day}</td>
                                   <td className="px-4 py-3.5 text-center font-mono font-bold">P{e.period}</td>
@@ -3623,9 +3926,9 @@ const AdminPage = () => {
                   onChange={(e) => setTimetableForm({ ...timetableForm, period: parseInt(e.target.value) })}
                   className="w-full px-4 py-3 bg-white border border-gray-300 rounded-xl text-gray-900 focus:ring-2 focus:ring-amber-500 outline-none transition-all"
                 >
-                  {[1, 2, 3, 4, 5, 6, 7, 8].map((p) => (
+                  {(activePeriodNumbers.length > 0 ? activePeriodNumbers : [1, 2, 3, 4, 5, 6, 7, 8]).map((p) => (
                     <option key={p} value={p}>
-                      Period {p}
+                      {periodConfigMap[p]?.periodName || `Period ${p}`} {periodConfigMap[p] ? `(${periodConfigMap[p].startTime}-${periodConfigMap[p].endTime})` : ''}
                     </option>
                   ))}
                 </select>

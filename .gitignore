@@ -34,3 +34,5 @@ app.log
 tmp/
 temp/
 .vercel
+backend/scratch/
+

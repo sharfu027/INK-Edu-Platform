@@ -29,7 +29,8 @@ import {
   updateTimetableEntry,
   deleteTimetableEntry,
   getClassHistory,
-  getCompanySettings
+  getCompanySettings,
+  getPeriods
 } from '../services/authService';
 import Spinner from '../components/ui/Spinner';
 import { useNavigate } from 'react-router-dom';
@@ -68,6 +69,7 @@ const DashboardPage = () => {
 
   // Timetable and Schedule States
   const [timetableEntries, setTimetableEntries] = useState([]);
+  const [dynamicPeriods, setDynamicPeriods] = useState([]);
   const [isTimetableEditEnabled, setIsTimetableEditEnabled] = useState(false);
   const [selectedTimetableClass, setSelectedTimetableClass] = useState('');
   const [selectedTeacherId, setSelectedTeacherId] = useState('');
@@ -125,7 +127,6 @@ const DashboardPage = () => {
   // Dynamic period timings loader
   const periodsList = useMemo(() => {
     const list = [];
-    const seen = new Set();
     
     const parseTimeToMinutes = (timeStr) => {
       if (!timeStr) return 0;
@@ -141,26 +142,45 @@ const DashboardPage = () => {
       return hours * 60 + minutes;
     };
 
-    (timetableEntries || []).forEach(entry => {
-      const p = entry.period;
-      if (!p || seen.has(p)) return;
-      
-      const timeSlot = entry.timeSlot || '';
-      const startStr = entry.startTime || timeSlot.split('-')[0] || '';
-      const endStr = entry.endTime || timeSlot.split('-')[1] || '';
-      
-      if (startStr && endStr) {
-        list.push({
-          period: p,
-          start: startStr.trim(),
-          end: endStr.trim(),
-          startMin: parseTimeToMinutes(startStr),
-          endMin: parseTimeToMinutes(endStr)
+    // Primary source: dynamic period configurations from /api/periods
+    if (dynamicPeriods && dynamicPeriods.length > 0) {
+      dynamicPeriods
+        .filter(p => !p.isBreak && p.periodNumber && p.startTime && p.endTime)
+        .forEach(p => {
+          list.push({
+            period: p.periodNumber,
+            start: p.startTime,
+            end: p.endTime,
+            startMin: parseTimeToMinutes(p.startTime),
+            endMin: parseTimeToMinutes(p.endTime),
+            name: p.periodName
+          });
         });
-        seen.add(p);
-      }
-    });
+    }
 
+    // Fallback: derive from timetable entries if no period configurations exist
+    if (list.length === 0) {
+      const seen = new Set();
+      (timetableEntries || []).forEach(entry => {
+        const p = entry.period;
+        if (!p || seen.has(p)) return;
+        const timeSlot = entry.timeSlot || '';
+        const startStr = entry.startTime || timeSlot.split('-')[0] || '';
+        const endStr = entry.endTime || timeSlot.split('-')[1] || '';
+        if (startStr && endStr) {
+          list.push({
+            period: p,
+            start: startStr.trim(),
+            end: endStr.trim(),
+            startMin: parseTimeToMinutes(startStr),
+            endMin: parseTimeToMinutes(endStr)
+          });
+          seen.add(p);
+        }
+      });
+    }
+
+    // Final fallback: generate from settings
     if (list.length === 0 && settings) {
       const startTimeStr = settings.office_start_time || settings.timings?.start || '09:00';
       const periodDuration = settings.game_period_mins || 45;
@@ -202,7 +222,7 @@ const DashboardPage = () => {
     }
 
     return list.sort((a, b) => a.period - b.period);
-  }, [timetableEntries, settings]);
+  }, [dynamicPeriods, timetableEntries, settings]);
 
   const dynamicTimeSlots = useMemo(() => {
     const slots = {};
@@ -533,15 +553,19 @@ const DashboardPage = () => {
     
     // Always fetch dynamic configuration settings and timetables for all roles
     try {
-      const [settingsResult, ttResult] = await Promise.allSettled([
+      const [settingsResult, ttResult, periodsResult] = await Promise.allSettled([
         getCompanySettings(),
-        getTimetables()
+        getTimetables(),
+        getPeriods()
       ]);
       if (settingsResult.status === 'fulfilled' && settingsResult.value?.status && settingsResult.value.data) {
         setSettings(settingsResult.value.data);
       }
       if (ttResult.status === 'fulfilled' && ttResult.value?.status) {
         setTimetableEntries(ttResult.value.data);
+      }
+      if (periodsResult.status === 'fulfilled' && periodsResult.value?.status && Array.isArray(periodsResult.value.data)) {
+        setDynamicPeriods(periodsResult.value.data);
       }
     } catch (err) {
       console.error('Failed to fetch timetable timings or company settings:', err);
@@ -1244,7 +1268,7 @@ const DashboardPage = () => {
       }).join('');
     } else if (type === 'class') {
       const clsDoc = allClasses.find(c => c._id === selectedClassId);
-      const className = clsDoc ? `${clsDoc.standard}-${clsDoc.section} (${clsDoc.board})` : '';
+      const className = clsDoc ? `${clsDoc.standard}-${clsDoc.section} (${clsDoc.board || 'CBSE'})` : '';
       title = `Schedule for Class: ${className}`;
       
       const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -1347,6 +1371,35 @@ const DashboardPage = () => {
     return matchesStandard && matchesSection && matchesSearch;
   });
 
+  const isAdminOrPrincipalOrHOD = useMemo(() => {
+    return ['admin', 'principal', 'hod'].includes(user?.role?.toLowerCase()) || user?.isAdmin;
+  }, [user]);
+
+  const schoolStats = useMemo(() => {
+    if (!adminData) {
+      return { totalTeachers: 0, currentlyTeaching: 0, availableTeachers: 0, absentTeachers: 0, onTime: 0, late: 0, absent: 0, substituteActive: 0, upcoming: 0, totalScheduled: 0 };
+    }
+    const onTime = monitoringStats?.onTime || adminData.stats?.greenClasses || 0;
+    const late = monitoringStats?.late || adminData.stats?.yellowClasses || 0;
+    const absent = monitoringStats?.absent || adminData.stats?.redClasses || 0;
+    const substituteActive = monitoringStats?.substituteActive || adminData.stats?.purpleClasses || 0;
+    const upcoming = monitoringStats?.upcoming || adminData.stats?.blueClasses || 0;
+    const totalScheduled = monitoringStats?.totalScheduled || adminData.stats?.totalScheduled || (onTime + late + absent + substituteActive + upcoming);
+
+    return {
+      totalTeachers: adminData.stats?.totalTeachers || 0,
+      currentlyTeaching: adminData.stats?.currentlyTeaching || 0,
+      availableTeachers: adminData.stats?.availableTeachers || 0,
+      absentTeachers: adminData.stats?.absentTeachers || 0,
+      onTime,
+      late,
+      absent,
+      substituteActive,
+      upcoming,
+      totalScheduled
+    };
+  }, [adminData, monitoringStats]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white text-stone-850">
@@ -1399,19 +1452,27 @@ const DashboardPage = () => {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 text-center">
                   <span className="text-[10px] uppercase font-bold text-stone-400 block mb-1">Total Classes</span>
-                  <span className="text-3xl font-extrabold text-amber-600">{teacherData.cards.total}</span>
+                  <span className="text-3xl font-extrabold text-amber-600">
+                    {isAdminOrPrincipalOrHOD ? schoolStats.totalScheduled : teacherData.cards.total}
+                  </span>
                 </div>
                 <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 text-center">
                   <span className="text-[10px] uppercase font-bold text-stone-400 block mb-1">Completed</span>
-                  <span className="text-3xl font-extrabold text-emerald-600">{teacherData.cards.completed}</span>
+                  <span className="text-3xl font-extrabold text-emerald-600">
+                    {isAdminOrPrincipalOrHOD ? (schoolStats.onTime + schoolStats.late + schoolStats.substituteActive) : teacherData.cards.completed}
+                  </span>
                 </div>
                 <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-4 text-center">
                   <span className="text-[10px] uppercase font-bold text-stone-400 block mb-1">Upcoming</span>
-                  <span className="text-3xl font-extrabold text-sky-650">{teacherData.cards.upcoming}</span>
+                  <span className="text-3xl font-extrabold text-sky-650">
+                    {isAdminOrPrincipalOrHOD ? schoolStats.upcoming : teacherData.cards.upcoming}
+                  </span>
                 </div>
                 <div className="bg-amber-50/50 border border-amber-200 rounded-2xl p-4 text-center">
                   <span className="text-[10px] uppercase font-bold text-amber-600 block mb-1">Substitutes</span>
-                  <span className="text-3xl font-extrabold text-amber-600">{teacherData.cards.substitute}</span>
+                  <span className="text-3xl font-extrabold text-amber-600">
+                    {isAdminOrPrincipalOrHOD ? schoolStats.substituteActive : teacherData.cards.substitute}
+                  </span>
                 </div>
               </div>
 
@@ -1603,18 +1664,7 @@ const DashboardPage = () => {
           </div>
         )}        {['admin', 'principal', 'hod'].includes(user?.role?.toLowerCase()) && adminData && (() => {
           // Display stats directly from the API response
-          const totalTeachers = adminData.stats?.totalTeachers || 0;
-          const currentlyTeaching = adminData.stats?.currentlyTeaching || 0;
-          const availableTeachers = adminData.stats?.availableTeachers || 0;
-          const absentTeachers = adminData.stats?.absentTeachers || 0;
-
-          // Compliance stats counters from monitoringStats API (or fallback to adminData.stats)
-          const onTime = monitoringStats?.onTime || adminData.stats?.greenClasses || 0;
-          const late = monitoringStats?.late || adminData.stats?.yellowClasses || 0;
-          const absent = monitoringStats?.absent || adminData.stats?.redClasses || 0;
-          const substituteActive = monitoringStats?.substituteActive || adminData.stats?.purpleClasses || 0;
-          const upcoming = monitoringStats?.upcoming || adminData.stats?.blueClasses || 0;
-          const totalScheduled = monitoringStats?.totalScheduled || adminData.stats?.totalScheduled || (onTime + late + absent + substituteActive + upcoming);
+          const { totalTeachers, currentlyTeaching, availableTeachers, absentTeachers, onTime, late, absent, substituteActive, upcoming, totalScheduled } = schoolStats;
 
           const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
           const periods = [1, 2, 3, 4, 5, 6, 7];
@@ -2659,7 +2709,7 @@ const DashboardPage = () => {
                   <div className="bg-white border border-stone-200 shadow-sm rounded-2xl p-6">
                     {(() => {
                       const clsDoc = allClasses.find(c => c._id === selectedClassId);
-                      const classNameStr = clsDoc ? `${clsDoc.standard}-${clsDoc.section} (${clsDoc.board})` : 'N/A';
+                      const classNameStr = clsDoc ? `${clsDoc.standard}-${clsDoc.section} (${clsDoc.board || 'CBSE'})` : 'N/A';
                       return (
                         <h3 className="text-base font-bold text-stone-900 mb-6">
                           🏫 Schedule for Class: <span className="text-amber-600 font-extrabold">{classNameStr}</span>
@@ -3334,9 +3384,14 @@ const DashboardPage = () => {
                       onChange={(e) => handlePeriodChange(Number(e.target.value))}
                       className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-amber-500 text-stone-900 font-medium"
                     >
-                      {[1, 2, 3, 4, 5, 6, 7, 8].map(p => (
-                        <option key={p} value={p}>Period {p}</option>
-                      ))}
+                      {(periodsList.length > 0 ? periodsList.map(pl => pl.period) : [1, 2, 3, 4, 5, 6, 7, 8]).map(p => {
+                        const pInfo = periodsList.find(pl => pl.period === p);
+                        return (
+                          <option key={p} value={p}>
+                            {pInfo?.name || `Period ${p}`} {pInfo ? `(${pInfo.start}-${pInfo.end})` : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                   <div>

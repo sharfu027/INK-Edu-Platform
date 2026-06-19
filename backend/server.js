@@ -19,6 +19,7 @@ import attendanceRoutes from './src/routes/attendanceRoutes.js';
 import leaveRoutes from './src/routes/leaveRoutes.js';
 import dashboardRoutes from './src/routes/dashboardRoutes.js';
 import roleRoutes from './src/routes/roleRoutes.js';
+import periodRoutes from './src/routes/periodRoutes.js';
 import { startComplianceJob } from './src/utils/complianceJob.js';
 
 dotenv.config();
@@ -73,6 +74,7 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/leaves', leaveRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/roles', roleRoutes);
+app.use('/api/periods', periodRoutes);
 
 // Error Handling Middleware
 app.use((err, req, res, next) => {

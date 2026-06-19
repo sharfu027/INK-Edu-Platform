@@ -632,4 +632,26 @@ export const getClassHistory = async (classId) => {
   return response.data;
 };
 
+// ── Period Configuration APIs ──
+
+export const getPeriods = async () => {
+  const response = await api.get('/periods');
+  return response.data;
+};
+
+export const createPeriod = async (data) => {
+  const response = await api.post('/periods', data);
+  return response.data;
+};
+
+export const updatePeriod = async (id, data) => {
+  const response = await api.put(`/periods/${id}`, data);
+  return response.data;
+};
+
+export const deletePeriod = async (id) => {
+  const response = await api.delete(`/periods/${id}`);
+  return response.data;
+};
+
 

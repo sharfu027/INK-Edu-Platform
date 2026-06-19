@@ -3,6 +3,7 @@ import Class from '../models/Class.js';
 import Teacher from '../models/Teacher.js';
 import Subject from '../models/Subject.js';
 import TeacherClassSubjectMapping from '../models/TeacherClassSubjectMapping.js';
+import PeriodConfiguration from '../models/PeriodConfiguration.js';
 
 /**
  * Get weekly timetables. Optional query param classId to filter.
@@ -21,7 +22,26 @@ export const getTimetables = async (req, res) => {
       .populate('subject', 'name')
       .sort({ day: 1, period: 1 });
 
-    return res.status(200).json({ status: true, data: entries });
+    const periods = await PeriodConfiguration.find().lean();
+    const periodMap = {};
+    periods.forEach(p => {
+      if (p.periodNumber !== null && p.periodNumber !== undefined) {
+        periodMap[p.periodNumber] = p;
+      }
+    });
+
+    const mappedEntries = entries.map(entry => {
+      const entryObj = entry.toObject ? entry.toObject() : entry;
+      const pConfig = periodMap[entryObj.period];
+      if (pConfig) {
+        entryObj.startTime = pConfig.startTime;
+        entryObj.endTime = pConfig.endTime;
+        entryObj.timeSlot = `${pConfig.startTime}-${pConfig.endTime}`;
+      }
+      return entryObj;
+    });
+
+    return res.status(200).json({ status: true, data: mappedEntries });
   } catch (error) {
     return res.status(500).json({ status: false, message: error.message });
   }
@@ -43,18 +63,37 @@ export const createTimetableEntry = async (req, res) => {
     const subject = await Subject.findById(subjectId);
     if (!subject) return res.status(404).json({ status: false, message: 'Subject not found' });
 
-    if (!startTime || !endTime) {
+    const periodConf = await PeriodConfiguration.findOne({ periodNumber: period });
+    const finalStart = periodConf ? periodConf.startTime : startTime;
+    const finalEnd = periodConf ? periodConf.endTime : endTime;
+
+    if (!finalStart || !finalEnd) {
       return res.status(400).json({ status: false, message: 'Start time and End time are required' });
     }
 
-    const timeSlot = `${startTime}-${endTime}`;
+    const timeSlot = `${finalStart}-${finalEnd}`;
+    const teacherIdStr = teacher.teacherId || teacher.employeeId || '';
+    const classNameStr = `${cls.standard}-${cls.section}`;
 
     // Upsert the entry (so if there's already an entry for this class/day/period, it gets overwritten)
     const entry = await Timetable.findOneAndUpdate(
       { class: classId, day, period },
-      { startTime, endTime, timeSlot, teacher: teacherId, subject: subjectId },
+      { 
+        startTime: finalStart, 
+        endTime: finalEnd, 
+        timeSlot, 
+        teacher: teacherId, 
+        subject: subjectId,
+        teacherId: teacherIdStr,
+        className: classNameStr
+      },
       { new: true, upsert: true, runValidators: true }
     );
+
+    if (!entry.timetableId) {
+      entry.timetableId = entry._id.toString();
+      await entry.save();
+    }
 
     const populated = await entry.populate([
       { path: 'class', select: 'standard section' },
@@ -124,13 +163,21 @@ export const updateTimetableEntry = async (req, res) => {
 
     if (day) entry.day = day;
     if (period) entry.period = period;
-    if (startTime) entry.startTime = startTime;
-    if (endTime) entry.endTime = endTime;
 
-    if (startTime || endTime) {
-      const s = startTime || entry.startTime;
-      const e = endTime || entry.endTime;
-      entry.timeSlot = `${s}-${e}`;
+    const targetPeriod = period || entry.period;
+    const periodConf = await PeriodConfiguration.findOne({ periodNumber: targetPeriod });
+    if (periodConf) {
+      entry.startTime = periodConf.startTime;
+      entry.endTime = periodConf.endTime;
+      entry.timeSlot = `${periodConf.startTime}-${periodConf.endTime}`;
+    } else {
+      if (startTime) entry.startTime = startTime;
+      if (endTime) entry.endTime = endTime;
+      if (startTime || endTime) {
+        const s = startTime || entry.startTime;
+        const e = endTime || entry.endTime;
+        entry.timeSlot = `${s}-${e}`;
+      }
     }
 
     await entry.save();
@@ -288,12 +335,17 @@ export const createTeacherSchedule = async (req, res) => {
     }
 
     const [startTime, endTime] = timeSlot.split('-');
+    const teacherIdStr = teacher.teacherId || teacher.employeeId || '';
+    const classNameStr = `${cls.standard}-${cls.section}`;
+
     const updatePayload = {
       timeSlot,
       startTime: startTime || '09:00',
       endTime: endTime || '09:45',
       teacher: teacher._id,
-      subject: subject._id
+      subject: subject._id,
+      teacherId: teacherIdStr,
+      className: classNameStr
     };
     if (date) {
       updatePayload.date = date;
@@ -304,6 +356,11 @@ export const createTeacherSchedule = async (req, res) => {
       updatePayload,
       { new: true, upsert: true, runValidators: true }
     );
+
+    if (!entry.timetableId) {
+      entry.timetableId = entry._id.toString();
+      await entry.save();
+    }
 
     const populated = await entry.populate([
       { path: 'class', select: 'standard section board' },

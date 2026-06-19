@@ -175,7 +175,7 @@ export const approveLeave = async (req, res) => {
           // Find substitute teacher user to send notification
           const subTeacher = await Teacher.findById(alloc.substituteTeacherId).populate('user');
           if (subTeacher && subTeacher.user) {
-            const message = `You have been assigned Period ${timetableEntry.period} for Class ${timetableEntry.standard || ''} because ${request.teacher.name} is absent.`;
+            const message = `You have been assigned Period ${timetableEntry.period} for Class ${timetableEntry.className || ''} because ${request.teacher.name} is absent.`;
             
             // Create notification document
             const notif = await Notification.create({
@@ -244,7 +244,7 @@ export const assignSubstituteDirectly = async (req, res) => {
         // Find substitute teacher user to send notification
         const subTeacher = await Teacher.findById(alloc.substituteTeacherId).populate('user');
         if (subTeacher && subTeacher.user) {
-          const message = `You have been assigned Period ${timetableEntry.period} for Class ${timetableEntry.standard || ''} because ${origTeacher ? origTeacher.name : 'a teacher'} is absent.`;
+          const message = `You have been assigned Period ${timetableEntry.period} for Class ${timetableEntry.className || ''} because ${origTeacher ? origTeacher.name : 'a teacher'} is absent.`;
           
           // Create notification document
           const notif = await Notification.create({

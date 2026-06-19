@@ -4,6 +4,7 @@ import AuditLogs from '../models/AuditLogs.js';
 import Class from '../models/Class.js';
 import TeacherAttendance from '../models/TeacherAttendance.js';
 import { getIO } from '../config/socket.js';
+import PeriodConfiguration from '../models/PeriodConfiguration.js';
 
 const getLocalDateString = () => {
   const d = new Date();
@@ -44,6 +45,24 @@ const getAllTimetableForDate = async (dateStr, day) => {
       allEntries.push(...defaults);
     }
   }
+
+  const periods = await PeriodConfiguration.find().lean();
+  const periodMap = {};
+  periods.forEach(p => {
+    if (p.periodNumber !== null && p.periodNumber !== undefined) {
+      periodMap[p.periodNumber] = p;
+    }
+  });
+
+  allEntries.forEach(entry => {
+    const pConfig = periodMap[entry.period];
+    if (pConfig) {
+      entry.startTime = pConfig.startTime;
+      entry.endTime = pConfig.endTime;
+      entry.timeSlot = `${pConfig.startTime}-${pConfig.endTime}`;
+    }
+  });
+
   return allEntries;
 };
 
