@@ -119,8 +119,12 @@ const runDatabaseMigration = async () => {
 };
 
 const connectDB = async () => {
+  const dbUrl = process.env.MONGODB_URL;
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URL || 'mongodb://localhost:27017/face_auth_db', {
+    if (!dbUrl && (process.env.ENVIRONMENT === 'production' || process.env.NODE_ENV === 'production')) {
+      throw new Error('MONGODB_URL is required in production but was not set.');
+    }
+    const conn = await mongoose.connect(dbUrl || 'mongodb://localhost:27017/face_auth_db', {
       dbName: process.env.MONGODB_DB_NAME || 'face_auth_db'
     });
     console.log(`MongoDB Connected: ${conn.connection.host}`);
@@ -129,7 +133,22 @@ const connectDB = async () => {
     await runDatabaseMigration();
   } catch (error) {
     console.error(`Database Connection Error: ${error.message}`);
-    console.warn('[Warning] Database connection failed. The server will continue to run, but database features will be unavailable.');
+    if (dbUrl && (process.env.ENVIRONMENT !== 'production' && process.env.NODE_ENV !== 'production')) {
+      console.warn('[Warning] Falling back to local MongoDB for development...');
+      try {
+        const conn = await mongoose.connect('mongodb://localhost:27017/face_auth_db', {
+          dbName: process.env.MONGODB_DB_NAME || 'face_auth_db'
+        });
+        console.log(`MongoDB Connected (Local Fallback): ${conn.connection.host}`);
+        await seedDefaultRoles();
+        await seedAdminUser();
+        await runDatabaseMigration();
+      } catch (fallbackError) {
+        console.error(`Local Fallback Connection Error: ${fallbackError.message}`);
+      }
+    } else {
+      console.warn('[Warning] Database connection failed. The server will continue to run, but database features will be unavailable.');
+    }
   }
 };
 

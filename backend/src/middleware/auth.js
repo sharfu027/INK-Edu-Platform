@@ -13,7 +13,11 @@ export const protect = async (req, res, next) => {
       token = req.headers.authorization.split(' ')[1];
 
       // Decode token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY || 'dev-secret-key-change-in-production-2024');
+      const secret = process.env.JWT_SECRET_KEY;
+      if (!secret && (process.env.ENVIRONMENT === 'production' || process.env.NODE_ENV === 'production')) {
+        throw new Error('JWT_SECRET_KEY is required in production but was not set.');
+      }
+      const decoded = jwt.verify(token, secret || 'dev-secret-key-change-in-production-2024');
 
       // Get user from DB
       req.user = await User.findById(decoded.id).select('-face_embeddings -password_hash');

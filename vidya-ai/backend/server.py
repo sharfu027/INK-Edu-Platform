@@ -260,8 +260,11 @@ def make_paper_prompt(req: PaperRequest):
 
 
 async def call_llm(system_msg: str, user_text: str, session_id: str, model: str = "gpt-5.2") -> str:
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Gemini API Key (EMERGENT_LLM_KEY) is not configured.")
     chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
+        api_key=api_key,
         session_id=session_id,
         system_message=system_msg,
     ).with_model("openai", model)
@@ -676,9 +679,12 @@ async def generate_diagram(req: DiagramRequest):
         f"Topic: {req.prompt}. Style: textbook illustration, white background, bold labels in English, "
         f"high contrast lines, no watermark, no extra text. Suitable for printing in a student notebook."
     )
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="Gemini API Key (EMERGENT_LLM_KEY) is not configured.")
     try:
         chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
+            api_key=api_key,
             session_id=session_id,
             system_message=system_msg,
         ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
