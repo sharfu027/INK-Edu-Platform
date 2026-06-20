@@ -50,6 +50,7 @@ if (!fs.existsSync(uploadsDir)) {
 // Global Middlewares
 const allowedOrigins = [
   'https://ink-edu-platform.vercel.app',
+  'https://ink-edu-platform-dy1u5ivnk-sharfu.vercel.app',
   'http://localhost:3000',
   'http://localhost:5173'
 ];
